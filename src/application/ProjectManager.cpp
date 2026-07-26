@@ -1,4 +1,5 @@
 #include "application/ProjectManager.h"
+#include "repository/ProjectRepository.h"
 
 #include <algorithm>
 #include <string>
@@ -57,6 +58,12 @@ std::string normalizeTechnologyForSearch(std::string_view value) {
 
 namespace devmanager {
 
+ProjectManager::ProjectManager(ProjectRepository& repository) : repository_(&repository) {
+    const ProjectStore store = repository_->load();
+    projects_ = store.projects;
+    nextId_ = store.nextId;
+}
+
 ProjectId ProjectManager::addProject(std::string name,
                                      std::vector<std::string> techStack,
                                      std::string description,
@@ -68,6 +75,7 @@ ProjectId ProjectManager::addProject(std::string name,
                            std::move(description),
                            std::move(status));
     ++nextId_;
+    saveCurrentState();
     return id;
 }
 
@@ -81,6 +89,7 @@ bool ProjectManager::deleteProject(ProjectId id) {
     }
 
     projects_.erase(iterator);
+    saveCurrentState();
     return true;
 }
 
@@ -123,6 +132,12 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
     }
 
     return matches;
+}
+
+void ProjectManager::saveCurrentState() const {
+    if (repository_ != nullptr) {
+        repository_->save(ProjectStore {nextId_, projects_});
+    }
 }
 
 }  // namespace devmanager

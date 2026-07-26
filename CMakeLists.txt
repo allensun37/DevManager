@@ -28,6 +28,12 @@ target_include_directories(DevManagerApplication PUBLIC
 )
 target_link_libraries(DevManagerApplication PUBLIC DevManagerDomain)
 
+add_library(DevManagerRepository src/repository/JsonProjectRepository.cpp)
+target_include_directories(DevManagerRepository PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerRepository PUBLIC DevManagerDomain)
+
 add_executable(DevManager src/main.cpp)
 target_link_libraries(DevManager PRIVATE nlohmann_json::nlohmann_json)
 
@@ -44,5 +50,14 @@ add_test(NAME DevManagerProjectTests COMMAND DevManagerProjectTests)
 add_executable(DevManagerProjectManagerTests
     tests/application/ProjectManagerTests.cpp
 )
-target_link_libraries(DevManagerProjectManagerTests PRIVATE DevManagerApplication)
+target_link_libraries(DevManagerProjectManagerTests PRIVATE
+    DevManagerApplication
+    DevManagerRepository
+)
 add_test(NAME DevManagerProjectManagerTests COMMAND DevManagerProjectManagerTests)
+
+add_executable(DevManagerJsonProjectRepositoryTests
+    tests/repository/JsonProjectRepositoryTests.cpp
+)
+target_link_libraries(DevManagerJsonProjectRepositoryTests PRIVATE DevManagerRepository)
+add_test(NAME DevManagerJsonProjectRepositoryTests COMMAND DevManagerJsonProjectRepositoryTests)

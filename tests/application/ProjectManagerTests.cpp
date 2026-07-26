@@ -1,6 +1,8 @@
 #include "application/ProjectManager.h"
+#include "repository/JsonProjectRepository.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -57,6 +59,33 @@ int main() {
            "Technology search supports case-insensitive partial matches");
     expect(manager.searchByTechnology("").empty(),
            "Empty technology search does not return every project");
+
+    const std::filesystem::path persistenceDirectory =
+        std::filesystem::current_path() / "project-manager-persistence-test-data";
+    std::filesystem::remove_all(persistenceDirectory);
+    const std::filesystem::path persistenceFile = persistenceDirectory / "projects.json";
+
+    {
+        devmanager::JsonProjectRepository repository(persistenceFile);
+        devmanager::ProjectManager persistentManager(repository);
+        expect(persistentManager.addProject("Persistent Project", {"C++"}, "Saved to JSON.",
+                                            "开发中") == 1,
+               "Persistent manager assigns the first ID");
+    }
+
+    {
+        devmanager::JsonProjectRepository repository(persistenceFile);
+        devmanager::ProjectManager restoredManager(repository);
+        expect(restoredManager.listProjects().size() == 1,
+               "Persistent manager restores projects after restart");
+        expect(restoredManager.listProjects()[0].name() == "Persistent Project",
+               "Persistent manager restores project fields after restart");
+        expect(restoredManager.addProject("Second Project", {"CMake"}, "Next ID test.",
+                                          "计划中") == 2,
+               "Persistent manager restores nextId after restart");
+    }
+
+    std::filesystem::remove_all(persistenceDirectory);
 
     return EXIT_SUCCESS;
 }
