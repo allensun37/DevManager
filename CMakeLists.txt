@@ -22,6 +22,12 @@ target_include_directories(DevManagerDomain PUBLIC
 )
 target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
 
+add_library(DevManagerApplication src/application/ProjectManager.cpp)
+target_include_directories(DevManagerApplication PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerApplication PUBLIC DevManagerDomain)
+
 add_executable(DevManager src/main.cpp)
 target_link_libraries(DevManager PRIVATE nlohmann_json::nlohmann_json)
 
@@ -34,3 +40,9 @@ set_tests_properties(DevManagerSmoke PROPERTIES
 add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
 target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain)
 add_test(NAME DevManagerProjectTests COMMAND DevManagerProjectTests)
+
+add_executable(DevManagerProjectManagerTests
+    tests/application/ProjectManagerTests.cpp
+)
+target_link_libraries(DevManagerProjectManagerTests PRIVATE DevManagerApplication)
+add_test(NAME DevManagerProjectManagerTests COMMAND DevManagerProjectManagerTests)
