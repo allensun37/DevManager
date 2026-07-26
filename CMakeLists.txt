@@ -16,6 +16,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+add_library(DevManagerDomain src/domain/Project.cpp)
+target_include_directories(DevManagerDomain PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
+
 add_executable(DevManager src/main.cpp)
 target_link_libraries(DevManager PRIVATE nlohmann_json::nlohmann_json)
 
@@ -24,3 +30,7 @@ add_test(NAME DevManagerSmoke COMMAND DevManager)
 set_tests_properties(DevManagerSmoke PROPERTIES
     PASS_REGULAR_EXPRESSION "DevManager project skeleton is ready"
 )
+
+add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
+target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain)
+add_test(NAME DevManagerProjectTests COMMAND DevManagerProjectTests)
