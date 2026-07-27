@@ -16,11 +16,63 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+add_library(DevManagerDomain src/domain/Project.cpp)
+target_include_directories(DevManagerDomain PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
+
+add_library(DevManagerApplication src/application/ProjectManager.cpp)
+target_include_directories(DevManagerApplication PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerApplication PUBLIC DevManagerDomain)
+
+add_library(DevManagerRepository src/repository/JsonProjectRepository.cpp)
+target_include_directories(DevManagerRepository PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerRepository PUBLIC DevManagerDomain)
+
+add_library(DevManagerMenu src/menu/MenuController.cpp)
+target_include_directories(DevManagerMenu PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerMenu PUBLIC DevManagerApplication)
+
 add_executable(DevManager src/main.cpp)
-target_link_libraries(DevManager PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(DevManager PRIVATE
+    DevManagerMenu
+    DevManagerRepository
+)
 
 enable_testing()
 add_test(NAME DevManagerSmoke COMMAND DevManager)
 set_tests_properties(DevManagerSmoke PROPERTIES
-    PASS_REGULAR_EXPRESSION "DevManager project skeleton is ready"
+    PASS_REGULAR_EXPRESSION "Goodbye"
 )
+
+add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
+target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain)
+add_test(NAME DevManagerProjectTests COMMAND DevManagerProjectTests)
+
+add_executable(DevManagerProjectManagerTests
+    tests/application/ProjectManagerTests.cpp
+)
+target_link_libraries(DevManagerProjectManagerTests PRIVATE
+    DevManagerApplication
+    DevManagerRepository
+)
+add_test(NAME DevManagerProjectManagerTests COMMAND DevManagerProjectManagerTests)
+
+add_executable(DevManagerJsonProjectRepositoryTests
+    tests/repository/JsonProjectRepositoryTests.cpp
+)
+target_link_libraries(DevManagerJsonProjectRepositoryTests PRIVATE DevManagerRepository)
+add_test(NAME DevManagerJsonProjectRepositoryTests COMMAND DevManagerJsonProjectRepositoryTests)
+
+add_executable(DevManagerMenuTests
+    tests/menu/MenuControllerTests.cpp
+)
+target_link_libraries(DevManagerMenuTests PRIVATE DevManagerMenu)
+add_test(NAME DevManagerMenuTests COMMAND DevManagerMenuTests)
