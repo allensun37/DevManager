@@ -16,7 +16,7 @@
 
 - [x] 菜单层只处理循环菜单、输入和输出。
 - [x] `ProjectManager` 只处理业务规则、项目集合和 ID 分配。
-- [ ] `Project` 只表示项目数据及其 JSON 转换。
+- [x] `Project` 只表示项目数据及其 JSON 转换。
 - [x] JSON 文件读写封装在仓储层，不写入菜单层或 `ProjectManager`。
 - [x] 业务层仅依赖仓储接口，不能依赖 JSON 细节。
 
@@ -28,7 +28,7 @@
 - [x] 建立 `src`、`include`、`data`、`tests` 目录。
 - [x] 配置 CMake、C++17 和 nlohmann/json 依赖。
 - [x] 验证空工程可配置、构建和运行。
-- [ ] 提交：`chore: initialize CMake project structure`
+- [x] 提交：`chore: initialize CMake project structure`
 
 ### 阶段 2：领域模型
 
@@ -36,7 +36,7 @@
 - [x] 明确字段规则：名称和状态非空；技术栈至少一个非空标签；描述可空。
 - [x] 设计 JSON 中项目对象的固定字段名。
 - [x] 为字段校验和 JSON 往返转换准备测试用例。
-- [ ] 提交：`feat: add project domain model`
+- [x] 提交：`feat: add project domain model`
 
 ### 阶段 3：业务逻辑
 
@@ -54,7 +54,7 @@
 - [x] 文件缺失时加载空库。
 - [x] JSON 损坏时返回明确错误，且不覆盖原文件。
 - [x] 验证重启后的项目数据与 `nextId` 能正确恢复。
-- [ ] 提交：`feat: add JSON project persistence`
+- [x] 提交：`feat: add JSON project persistence`
 
 ### 阶段 5：命令行交互
 
@@ -67,9 +67,9 @@
 
 ### 阶段 6：发布准备
 
-- [ ] 执行全部测试与手动菜单验收。
-- [ ] 检查中文文本、技术栈标签和 JSON 文件的显示与保存。
-- [ ] 在 README 记录构建、运行和数据文件位置。
+- [x] 执行全部测试与手动菜单验收。
+- [x] 检查中文文本、技术栈标签和 JSON 文件的显示与保存。
+- [x] 在 README 记录构建、运行和数据文件位置。
 - [ ] 创建 `v0.1.0` 标签。
 
 ## 必测场景
