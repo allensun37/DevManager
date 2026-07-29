@@ -1,6 +1,9 @@
 #include "repository/JsonProjectRepository.h"
+#include "repository/FileReplacer.h"
 
 #include <gtest/gtest.h>
+
+#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -8,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <system_error>
 
@@ -40,6 +44,17 @@ protected:
 
     std::filesystem::path directory;
     std::filesystem::path filePath;
+};
+
+devmanager::Project makeProject(devmanager::ProjectId id) {
+    return devmanager::Project{id, "Project", {"C++"}, "Description", "In progress"};
+}
+
+class FailingFileReplacer final : public devmanager::FileReplacer {
+public:
+    void replace(const std::filesystem::path&, const std::filesystem::path&) const override {
+        throw std::runtime_error("Injected replacement failure");
+    }
 };
 
 TEST_F(JsonProjectRepositoryTest, MissingDataFileCreatesAnEmptyStore) {
@@ -93,6 +108,92 @@ TEST_F(JsonProjectRepositoryTest, ReportsCorruptJsonWithoutOverwritingIt) {
     const std::string unchangedContent{std::istreambuf_iterator<char>(unchangedFile),
                                        std::istreambuf_iterator<char>()};
     EXPECT_EQ(unchangedContent, corruptContent);
+}
+
+TEST_F(JsonProjectRepositoryTest, AllowsAnEmptyStoreWithAForwardNextId) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore store{2, {}};
+
+    repository.saveStore(store);
+
+    EXPECT_TRUE(std::filesystem::exists(filePath));
+    EXPECT_EQ(repository.loadStore().nextId, 2);
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsAnEmptyStoreWithAZeroNextId) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore store{0, {}};
+
+    EXPECT_THROW(repository.saveStore(store), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(filePath));
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsAStoreWithAZeroProjectId) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore store{1, {makeProject(0)}};
+
+    EXPECT_THROW(repository.saveStore(store), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(filePath));
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsAStoreWithDuplicateProjectIds) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore store{3, {makeProject(1), makeProject(1)}};
+
+    EXPECT_THROW(repository.saveStore(store), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(filePath));
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsAStoreWhoseNextIdDoesNotExceedItsProjectIds) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore store{2, {makeProject(2)}};
+
+    EXPECT_THROW(repository.saveStore(store), std::runtime_error);
+    EXPECT_FALSE(std::filesystem::exists(filePath));
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsAStoredSemanticInvalidSnapshot) {
+    nlohmann::json payload;
+    payload["nextId"] = 3;
+    payload["projects"] = nlohmann::json::array({makeProject(1).toJson(), makeProject(1).toJson()});
+    {
+        std::ofstream output(filePath);
+        ASSERT_TRUE(output.is_open());
+        output << payload.dump();
+    }
+
+    const devmanager::JsonProjectRepository repository(filePath);
+
+    EXPECT_THROW(static_cast<void>(repository.loadStore()), std::runtime_error);
+}
+
+TEST_F(JsonProjectRepositoryTest, PreservesTheOriginalFileAndCleansTemporaryFilesWhenReplacementFails) {
+    const devmanager::ProjectStore originalStore{2, {makeProject(1)}};
+    const devmanager::ProjectStore replacementStore{3, {makeProject(1), makeProject(2)}};
+    devmanager::JsonProjectRepository(filePath).saveStore(originalStore);
+
+    std::ifstream originalInput(filePath, std::ios::binary);
+    const std::string originalContent{std::istreambuf_iterator<char>(originalInput),
+                                      std::istreambuf_iterator<char>()};
+
+    const auto replacer = std::make_shared<FailingFileReplacer>();
+    const devmanager::JsonProjectRepository repository(filePath, replacer);
+
+    EXPECT_THROW(repository.saveStore(replacementStore), std::runtime_error);
+
+    std::ifstream resultingInput(filePath, std::ios::binary);
+    const std::string resultingContent{std::istreambuf_iterator<char>(resultingInput),
+                                       std::istreambuf_iterator<char>()};
+    EXPECT_EQ(resultingContent, originalContent);
+
+    bool hasTemporaryFile = false;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(directory)) {
+        if (entry.path().filename().string().find("projects.json.tmp-") == 0) {
+            hasTemporaryFile = true;
+        }
+    }
+    EXPECT_FALSE(hasTemporaryFile);
 }
 
 }  // namespace

@@ -3,6 +3,8 @@
 #include "repository/ProjectRepository.h"
 
 #include <algorithm>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -54,14 +56,18 @@ ProjectId ProjectManager::addProject(std::string name,
                                      std::vector<std::string> techStack,
                                      std::string description,
                                      std::string status) {
+    if (nextId_ == std::numeric_limits<ProjectId>::max()) {
+        throw std::overflow_error("Project ID space is exhausted");
+    }
+
     const ProjectId id = nextId_;
-    projects_.emplace_back(id,
-                           std::move(name),
-                           std::move(techStack),
-                           std::move(description),
-                           std::move(status));
-    ++nextId_;
-    saveCurrentState();
+    ProjectStore candidate{nextId_ + 1, projects_};
+    candidate.projects.emplace_back(id,
+                                    std::move(name),
+                                    std::move(techStack),
+                                    std::move(description),
+                                    std::move(status));
+    commitCandidate(std::move(candidate));
     return id;
 }
 
@@ -74,8 +80,10 @@ bool ProjectManager::deleteProject(ProjectId id) {
         return false;
     }
 
-    projects_.erase(iterator);
-    saveCurrentState();
+    ProjectStore candidate{nextId_, projects_};
+    candidate.projects.erase(candidate.projects.begin() +
+                             std::distance(projects_.begin(), iterator));
+    commitCandidate(std::move(candidate));
     return true;
 }
 
@@ -120,10 +128,13 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
     return matches;
 }
 
-void ProjectManager::saveCurrentState() const {
+void ProjectManager::commitCandidate(ProjectStore candidate) {
     if (repository_ != nullptr) {
-        repository_->saveStore(ProjectStore {nextId_, projects_});
+        repository_->saveStore(candidate);
     }
+
+    projects_ = std::move(candidate.projects);
+    nextId_ = candidate.nextId;
 }
 
 }  // namespace devmanager

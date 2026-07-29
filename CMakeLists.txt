@@ -48,7 +48,10 @@ target_include_directories(DevManagerApplication PUBLIC
 )
 target_link_libraries(DevManagerApplication PUBLIC DevManagerCommon DevManagerDomain)
 
-add_library(DevManagerRepository src/repository/JsonProjectRepository.cpp)
+add_library(DevManagerRepository
+    src/repository/FileReplacer.cpp
+    src/repository/JsonProjectRepository.cpp
+)
 target_include_directories(DevManagerRepository PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

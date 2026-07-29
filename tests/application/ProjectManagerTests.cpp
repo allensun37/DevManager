@@ -7,7 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <string>
+#include <stdexcept>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -52,7 +54,14 @@ public:
     }
 
     void saveStore(const devmanager::ProjectStore& store) const override {
+        if (failSaves_) {
+            throw std::runtime_error("Injected save failure");
+        }
         savedStores_.push_back(store);
+    }
+
+    void setFailSaves(bool failSaves) {
+        failSaves_ = failSaves;
     }
 
     [[nodiscard]] const std::vector<devmanager::ProjectStore>& savedStores() const {
@@ -62,6 +71,7 @@ public:
 private:
     devmanager::ProjectStore initialStore_;
     mutable std::vector<devmanager::ProjectStore> savedStores_;
+    bool failSaves_ {false};
 };
 
 TEST_F(ProjectManagerTest, AssignsIncreasingIdsAndKeepsInsertionOrder) {
@@ -140,6 +150,25 @@ TEST_F(ProjectManagerTest, RestoresProjectsAndNextIdFromRepository) {
     }
 }
 
+TEST_F(ProjectManagerTest, DoesNotReuseAnIdAfterDeletingTheLastPersistedProject) {
+    const std::filesystem::path persistenceFile = persistenceDirectory / "projects.json";
+
+    {
+        devmanager::JsonProjectRepository repository(persistenceFile);
+        devmanager::ProjectManager manager(repository);
+        EXPECT_EQ(manager.addProject("Temporary", {"C++"}, "Description", "开发中"), 1);
+        EXPECT_TRUE(manager.deleteProject(1));
+    }
+
+    {
+        devmanager::JsonProjectRepository repository(persistenceFile);
+        devmanager::ProjectManager restoredManager(repository);
+        EXPECT_TRUE(restoredManager.listProjects().empty());
+        EXPECT_EQ(restoredManager.addProject("Replacement", {"CMake"}, "Description", "计划中"),
+                  2);
+    }
+}
+
 TEST(ProjectManagerRepositoryContractTest, LoadsAndSavesWholeProjectStores) {
     RecordingProjectRepository repository{
         {2, {devmanager::Project{1, "Existing", {"C++"}, "Already saved.", "开发中"}}},
@@ -155,6 +184,55 @@ TEST(ProjectManagerRepositoryContractTest, LoadsAndSavesWholeProjectStores) {
     ASSERT_EQ(savedStore.projects.size(), 2U);
     EXPECT_EQ(savedStore.projects[0].id(), 1);
     EXPECT_EQ(savedStore.projects[1].id(), 2);
+}
+
+TEST(ProjectManagerPersistenceTest, RollsBackAnAddWhenSavingFails) {
+    RecordingProjectRepository repository{{1, {}}};
+    repository.setFailSaves(true);
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_THROW(static_cast<void>(manager.addProject("New project", {"C++"},
+                                                       "Description", "开发中")),
+                 std::runtime_error);
+    EXPECT_TRUE(manager.listProjects().empty());
+    EXPECT_TRUE(repository.savedStores().empty());
+
+    repository.setFailSaves(false);
+    EXPECT_EQ(manager.addProject("New project", {"C++"}, "Description", "开发中"), 1);
+}
+
+TEST(ProjectManagerPersistenceTest, RollsBackADeletionWhenSavingFails) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Existing", {"C++"}, "Description", "开发中"}}},
+    };
+    repository.setFailSaves(true);
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_THROW(static_cast<void>(manager.deleteProject(1)), std::runtime_error);
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects()[0].id(), 1);
+    EXPECT_TRUE(repository.savedStores().empty());
+
+    repository.setFailSaves(false);
+    EXPECT_TRUE(manager.deleteProject(1));
+    ASSERT_EQ(repository.savedStores().size(), 1U);
+    EXPECT_EQ(repository.savedStores()[0].nextId, 2);
+}
+
+TEST(ProjectManagerPersistenceTest, RejectsAnAddWhenNextIdIsAtTheMaximum) {
+    const devmanager::ProjectId maximumId = std::numeric_limits<devmanager::ProjectId>::max();
+    RecordingProjectRepository repository{
+        {maximumId,
+         {devmanager::Project{1, "Existing", {"C++"}, "Description", "开发中"}}},
+    };
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_THROW(static_cast<void>(manager.addProject("New project", {"C++"},
+                                                       "Description", "开发中")),
+                 std::overflow_error);
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects()[0].id(), 1);
+    EXPECT_TRUE(repository.savedStores().empty());
 }
 
 }  // namespace

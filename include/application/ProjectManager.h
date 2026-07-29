@@ -9,6 +9,7 @@
 namespace devmanager {
 
 class ProjectRepository;
+struct ProjectStore;
 
 class ProjectManager {
 public:
@@ -26,7 +27,7 @@ public:
     [[nodiscard]] std::vector<Project> searchByTechnology(std::string_view query) const;
 
 private:
-    void saveCurrentState() const;
+    void commitCandidate(ProjectStore candidate);
 
     std::vector<Project> projects_;
     ProjectId nextId_ {1};
