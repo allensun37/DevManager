@@ -1,79 +1,98 @@
 #include "repository/JsonProjectRepository.h"
 
-#include <cstdlib>
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <exception>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
+#include <iterator>
 #include <string>
-#include <vector>
+#include <system_error>
 
 namespace {
 
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        std::cerr << "Test failed: " << message << '\n';
-        std::exit(EXIT_FAILURE);
+std::filesystem::path makeUniqueTestDirectory() {
+    static std::atomic_uint64_t counter{0};
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto suffix = std::to_string(timestamp) + "-" + std::to_string(counter++);
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / ("devmanager-repository-tests-" + suffix);
+    std::filesystem::create_directories(directory);
+    return directory;
+}
+
+class JsonProjectRepositoryTest : public testing::Test {
+protected:
+    void SetUp() override {
+        directory = makeUniqueTestDirectory();
+        filePath = directory / "projects.json";
     }
+
+    void TearDown() override {
+        std::error_code error;
+        std::filesystem::remove_all(directory, error);
+        if (error) {
+            ADD_FAILURE() << "Failed to remove test directory: " << error.message();
+        }
+    }
+
+    std::filesystem::path directory;
+    std::filesystem::path filePath;
+};
+
+TEST_F(JsonProjectRepositoryTest, MissingDataFileCreatesAnEmptyStore) {
+    const devmanager::JsonProjectRepository repository(filePath);
+
+    const devmanager::ProjectStore store = repository.load();
+
+    EXPECT_EQ(store.nextId, 1);
+    EXPECT_TRUE(store.projects.empty());
 }
 
-std::filesystem::path testDirectory() {
-    return std::filesystem::current_path() / "repository-test-data";
-}
-
-}  // namespace
-
-int main() {
-    const std::filesystem::path directory = testDirectory();
-    std::filesystem::remove_all(directory);
-    const std::filesystem::path filePath = directory / "projects.json";
-
-    devmanager::JsonProjectRepository repository(filePath);
-    const devmanager::ProjectStore emptyStore = repository.load();
-    expect(emptyStore.nextId == 1, "Missing data file starts with ID 1");
-    expect(emptyStore.projects.empty(), "Missing data file starts with no projects");
-
-    const devmanager::ProjectStore expected {
+TEST_F(JsonProjectRepositoryTest, SavesAndRestoresAProjectStore) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::ProjectStore expected{
         3,
-        {devmanager::Project {1, "DevManager", {"C++", "CMake"},
+        {devmanager::Project{1, "DevManager", {"C++", "CMake"},
                              "Personal project manager.", "开发中"},
-         devmanager::Project {2, "HTTP Server", {"C++", "Linux Socket"},
+         devmanager::Project{2, "HTTP Server", {"C++", "Linux Socket"},
                              "Socket practice.", "学习中"}},
     };
 
     repository.save(expected);
-    expect(std::filesystem::exists(filePath), "Repository creates its JSON data file");
 
+    EXPECT_TRUE(std::filesystem::exists(filePath));
     const devmanager::ProjectStore restored = repository.load();
-    expect(restored.nextId == 3, "Repository restores nextId");
-    expect(restored.projects.size() == 2, "Repository restores every saved project");
-    expect(restored.projects[0].name() == "DevManager", "Repository preserves project data");
-    expect(restored.projects[1].techStack()[1] == "Linux Socket",
-           "Repository preserves technology tags");
+    EXPECT_EQ(restored.nextId, 3);
+    ASSERT_EQ(restored.projects.size(), 2U);
+    EXPECT_EQ(restored.projects[0].name(), "DevManager");
+    EXPECT_EQ(restored.projects[0].status(), "开发中");
+    EXPECT_EQ(restored.projects[1].techStack()[1], "Linux Socket");
+}
 
+TEST_F(JsonProjectRepositoryTest, ReportsCorruptJsonWithoutOverwritingIt) {
+    const devmanager::JsonProjectRepository repository(filePath);
     const std::string corruptContent = "{ this is not valid JSON";
     {
         std::ofstream corruptFile(filePath);
+        ASSERT_TRUE(corruptFile.is_open());
         corruptFile << corruptContent;
     }
 
-    std::string errorMessage;
     try {
         static_cast<void>(repository.load());
+        FAIL() << "Expected corrupt JSON to throw";
     } catch (const std::exception& error) {
-        errorMessage = error.what();
+        EXPECT_NE(std::string(error.what()).find("Invalid project data file"),
+                  std::string::npos);
     }
-    expect(errorMessage.find("Invalid project data file") != std::string::npos,
-           "Corrupt data reports a clear repository error");
 
-    std::string unchangedContent;
-    {
-        std::ifstream unchangedFile(filePath);
-        unchangedContent.assign(std::istreambuf_iterator<char>(unchangedFile),
-                                std::istreambuf_iterator<char>());
-    }
-    expect(unchangedContent == corruptContent,
-           "A failed load does not overwrite corrupt project data");
-
-    std::filesystem::remove_all(directory);
-    return EXIT_SUCCESS;
+    std::ifstream unchangedFile(filePath);
+    const std::string unchangedContent{std::istreambuf_iterator<char>(unchangedFile),
+                                       std::istreambuf_iterator<char>()};
+    EXPECT_EQ(unchangedContent, corruptContent);
 }
+
+}  // namespace

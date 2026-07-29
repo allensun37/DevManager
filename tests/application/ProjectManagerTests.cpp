@@ -1,91 +1,118 @@
 #include "application/ProjectManager.h"
 #include "repository/JsonProjectRepository.h"
 
-#include <cstdlib>
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
 #include <filesystem>
-#include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
 
-void expect(bool condition, const std::string& message) {
-    if (!condition) {
-        std::cerr << "Test failed: " << message << '\n';
-        std::exit(EXIT_FAILURE);
-    }
+std::filesystem::path makeUniqueTestDirectory() {
+    static std::atomic_uint64_t counter{0};
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto suffix = std::to_string(timestamp) + "-" + std::to_string(counter++);
+    const std::filesystem::path directory =
+        std::filesystem::temp_directory_path() / ("devmanager-manager-tests-" + suffix);
+    std::filesystem::create_directories(directory);
+    return directory;
 }
 
-}  // namespace
+class ProjectManagerTest : public testing::Test {
+protected:
+    void SetUp() override {
+        persistenceDirectory = makeUniqueTestDirectory();
+    }
 
-int main() {
+    void TearDown() override {
+        std::error_code error;
+        std::filesystem::remove_all(persistenceDirectory, error);
+        if (error) {
+            ADD_FAILURE() << "Failed to remove test directory: " << error.message();
+        }
+    }
+
+    std::filesystem::path persistenceDirectory;
+};
+
+TEST_F(ProjectManagerTest, AssignsIncreasingIdsAndKeepsInsertionOrder) {
     devmanager::ProjectManager manager;
 
     const devmanager::ProjectId firstId = manager.addProject(
         "DevManager", {"C++", "CMake"}, "Personal project manager.", "开发中");
-    const devmanager::ProjectId secondId = manager.addProject(
-        "HTTP Server", {"C++", "Linux Socket"}, "Socket practice.", "学习中");
+    const devmanager::ProjectId secondId =
+        manager.addProject("HTTP Server", {"C++", "Linux Socket"}, "Socket practice.", "学习中");
 
-    expect(firstId == 1, "The first project receives ID 1");
-    expect(secondId == 2, "The next project receives the next ID");
+    ASSERT_EQ(firstId, 1);
+    ASSERT_EQ(secondId, 2);
 
     const std::vector<devmanager::Project>& projects = manager.listProjects();
-    expect(projects.size() == 2, "Manager lists every added project");
-    expect(projects[0].name() == "DevManager", "Manager preserves insertion order");
-    expect(projects[1].id() == secondId, "Manager stores the assigned ID");
+    ASSERT_EQ(projects.size(), 2U);
+    EXPECT_EQ(projects[0].name(), "DevManager");
+    EXPECT_EQ(projects[1].id(), secondId);
+}
 
-    expect(manager.deleteProject(firstId), "Manager deletes an existing project by ID");
-    expect(!manager.deleteProject(999), "Manager reports a missing project ID");
-    expect(manager.listProjects().size() == 1, "Manager removes only the selected project");
-    expect(manager.listProjects()[0].id() == secondId,
-           "Manager retains other projects after deletion");
+TEST_F(ProjectManagerTest, DeletesExistingProjectsWithoutReusingTheirIds) {
+    devmanager::ProjectManager manager;
+    const devmanager::ProjectId firstId =
+        manager.addProject("DevManager", {"C++"}, "Personal project manager.", "开发中");
+    const devmanager::ProjectId secondId =
+        manager.addProject("HTTP Server", {"C++"}, "Socket practice.", "学习中");
 
-    const devmanager::ProjectId thirdId = manager.addProject(
-        "Blog System", {"Vue"}, "Frontend practice.", "计划中");
-    expect(thirdId == 3, "Manager never reuses a deleted project ID");
+    EXPECT_TRUE(manager.deleteProject(firstId));
+    EXPECT_FALSE(manager.deleteProject(999));
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects()[0].id(), secondId);
+
+    const devmanager::ProjectId thirdId =
+        manager.addProject("Blog System", {"Vue"}, "Frontend practice.", "计划中");
+    EXPECT_EQ(thirdId, 3);
+}
+
+TEST_F(ProjectManagerTest, SearchesNamesAndTechnologyCaseInsensitively) {
+    devmanager::ProjectManager manager;
+    static_cast<void>(manager.addProject("DevManager", {"CMake"},
+                                         "Personal project manager.", "开发中"));
+    static_cast<void>(manager.addProject("HTTP Server", {"C++", "Linux Socket"},
+                                         "Socket practice.", "学习中"));
 
     const std::vector<devmanager::Project> nameResults = manager.searchByName("SERVER");
-    expect(nameResults.size() == 1, "Name search supports case-insensitive partial matches");
-    expect(nameResults[0].name() == "HTTP Server", "Name search returns the matching project");
-    expect(manager.searchByName("").empty(), "Empty name search does not return every project");
+    ASSERT_EQ(nameResults.size(), 1U);
+    EXPECT_EQ(nameResults[0].name(), "HTTP Server");
+    EXPECT_TRUE(manager.searchByName("").empty());
 
     const std::vector<devmanager::Project> technologyResults =
         manager.searchByTechnology("cpp");
-    expect(technologyResults.size() == 1,
-           "Technology search normalizes C++ and cpp before matching");
-    expect(technologyResults[0].name() == "HTTP Server",
-           "Technology search returns the project with the matched tag");
-    expect(manager.searchByTechnology("SOCKET").size() == 1,
-           "Technology search supports case-insensitive partial matches");
-    expect(manager.searchByTechnology("").empty(),
-           "Empty technology search does not return every project");
+    ASSERT_EQ(technologyResults.size(), 1U);
+    EXPECT_EQ(technologyResults[0].name(), "HTTP Server");
+    EXPECT_EQ(manager.searchByTechnology("SOCKET").size(), 1U);
+    EXPECT_TRUE(manager.searchByTechnology("").empty());
+}
 
-    const std::filesystem::path persistenceDirectory =
-        std::filesystem::current_path() / "project-manager-persistence-test-data";
-    std::filesystem::remove_all(persistenceDirectory);
+TEST_F(ProjectManagerTest, RestoresProjectsAndNextIdFromRepository) {
     const std::filesystem::path persistenceFile = persistenceDirectory / "projects.json";
 
     {
         devmanager::JsonProjectRepository repository(persistenceFile);
-        devmanager::ProjectManager persistentManager(repository);
-        expect(persistentManager.addProject("Persistent Project", {"C++"}, "Saved to JSON.",
-                                            "开发中") == 1,
-               "Persistent manager assigns the first ID");
+        devmanager::ProjectManager manager(repository);
+        EXPECT_EQ(manager.addProject("Persistent Project", {"C++"}, "Saved to JSON.",
+                                     "开发中"),
+                  1);
     }
 
     {
         devmanager::JsonProjectRepository repository(persistenceFile);
         devmanager::ProjectManager restoredManager(repository);
-        expect(restoredManager.listProjects().size() == 1,
-               "Persistent manager restores projects after restart");
-        expect(restoredManager.listProjects()[0].name() == "Persistent Project",
-               "Persistent manager restores project fields after restart");
-        expect(restoredManager.addProject("Second Project", {"CMake"}, "Next ID test.",
-                                          "计划中") == 2,
-               "Persistent manager restores nextId after restart");
+        ASSERT_EQ(restoredManager.listProjects().size(), 1U);
+        EXPECT_EQ(restoredManager.listProjects()[0].name(), "Persistent Project");
+        EXPECT_EQ(restoredManager.addProject("Second Project", {"CMake"}, "Next ID test.",
+                                             "计划中"),
+                  2);
     }
-
-    std::filesystem::remove_all(persistenceDirectory);
-
-    return EXIT_SUCCESS;
 }
+
+}  // namespace

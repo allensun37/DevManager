@@ -16,6 +16,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    # GoogleTest v1.17.0
+    GIT_TAG 52eb8108c5bdec04579160ae17225d66034bd723
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(googletest)
+
 add_library(DevManagerDomain src/domain/Project.cpp)
 target_include_directories(DevManagerDomain PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -47,14 +58,15 @@ target_link_libraries(DevManager PRIVATE
 )
 
 enable_testing()
+include(GoogleTest)
 add_test(NAME DevManagerSmoke COMMAND DevManager)
 set_tests_properties(DevManagerSmoke PROPERTIES
     PASS_REGULAR_EXPRESSION "Goodbye"
 )
 
 add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
-target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain)
-add_test(NAME DevManagerProjectTests COMMAND DevManagerProjectTests)
+target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain GTest::gtest_main)
+gtest_discover_tests(DevManagerProjectTests)
 
 add_executable(DevManagerProjectManagerTests
     tests/application/ProjectManagerTests.cpp
@@ -62,17 +74,21 @@ add_executable(DevManagerProjectManagerTests
 target_link_libraries(DevManagerProjectManagerTests PRIVATE
     DevManagerApplication
     DevManagerRepository
+    GTest::gtest_main
 )
-add_test(NAME DevManagerProjectManagerTests COMMAND DevManagerProjectManagerTests)
+gtest_discover_tests(DevManagerProjectManagerTests)
 
 add_executable(DevManagerJsonProjectRepositoryTests
     tests/repository/JsonProjectRepositoryTests.cpp
 )
-target_link_libraries(DevManagerJsonProjectRepositoryTests PRIVATE DevManagerRepository)
-add_test(NAME DevManagerJsonProjectRepositoryTests COMMAND DevManagerJsonProjectRepositoryTests)
+target_link_libraries(DevManagerJsonProjectRepositoryTests PRIVATE
+    DevManagerRepository
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerJsonProjectRepositoryTests)
 
 add_executable(DevManagerMenuTests
     tests/menu/MenuControllerTests.cpp
 )
-target_link_libraries(DevManagerMenuTests PRIVATE DevManagerMenu)
-add_test(NAME DevManagerMenuTests COMMAND DevManagerMenuTests)
+target_link_libraries(DevManagerMenuTests PRIVATE DevManagerMenu GTest::gtest_main)
+gtest_discover_tests(DevManagerMenuTests)
