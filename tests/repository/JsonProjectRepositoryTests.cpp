@@ -45,7 +45,7 @@ protected:
 TEST_F(JsonProjectRepositoryTest, MissingDataFileCreatesAnEmptyStore) {
     const devmanager::JsonProjectRepository repository(filePath);
 
-    const devmanager::ProjectStore store = repository.load();
+    const devmanager::ProjectStore store = repository.loadStore();
 
     EXPECT_EQ(store.nextId, 1);
     EXPECT_TRUE(store.projects.empty());
@@ -61,10 +61,10 @@ TEST_F(JsonProjectRepositoryTest, SavesAndRestoresAProjectStore) {
                              "Socket practice.", "学习中"}},
     };
 
-    repository.save(expected);
+    repository.saveStore(expected);
 
     EXPECT_TRUE(std::filesystem::exists(filePath));
-    const devmanager::ProjectStore restored = repository.load();
+    const devmanager::ProjectStore restored = repository.loadStore();
     EXPECT_EQ(restored.nextId, 3);
     ASSERT_EQ(restored.projects.size(), 2U);
     EXPECT_EQ(restored.projects[0].name(), "DevManager");
@@ -82,7 +82,7 @@ TEST_F(JsonProjectRepositoryTest, ReportsCorruptJsonWithoutOverwritingIt) {
     }
 
     try {
-        static_cast<void>(repository.load());
+        static_cast<void>(repository.loadStore());
         FAIL() << "Expected corrupt JSON to throw";
     } catch (const std::exception& error) {
         EXPECT_NE(std::string(error.what()).find("Invalid project data file"),

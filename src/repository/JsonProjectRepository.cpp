@@ -10,7 +10,7 @@ JsonProjectRepository::JsonProjectRepository(std::filesystem::path filePath)
     : filePath_(std::move(filePath)) {
 }
 
-ProjectStore JsonProjectRepository::load() const {
+ProjectStore JsonProjectRepository::loadStore() const {
     if (!std::filesystem::exists(filePath_)) {
         return {};
     }
@@ -37,7 +37,7 @@ ProjectStore JsonProjectRepository::load() const {
     }
 }
 
-void JsonProjectRepository::save(const ProjectStore& store) const {
+void JsonProjectRepository::saveStore(const ProjectStore& store) const {
     const std::filesystem::path parentDirectory = filePath_.parent_path();
     if (!parentDirectory.empty()) {
         std::filesystem::create_directories(parentDirectory);

@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -55,6 +56,33 @@ TEST(MenuControllerTest, ReportsProjectValidationErrors) {
 
     EXPECT_TRUE(manager.listProjects().empty());
     EXPECT_NE(output.str().find("Invalid project"), std::string::npos);
+}
+
+TEST(MenuControllerTest, TrimsAsciiWhitespaceFromTechnologyTags) {
+    std::istringstream input(
+        "2\nTrim Me\n C++, \tCMake \nDescription\nPlanned\n0\n");
+    std::ostringstream output;
+    devmanager::ProjectManager manager;
+    devmanager::MenuController controller(manager, input, output);
+
+    controller.run();
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects()[0].techStack(),
+              (std::vector<std::string>{"C++", "CMake"}));
+}
+
+TEST(MenuControllerTest, TrimsAsciiWhitespaceFromProjectIds) {
+    devmanager::ProjectManager manager;
+    static_cast<void>(manager.addProject("Delete Me", {"CMake"}, "Temporary project", "Planned"));
+    std::istringstream input("3\n \t1 \r\ny\n0\n");
+    std::ostringstream output;
+    devmanager::MenuController controller(manager, input, output);
+
+    controller.run();
+
+    EXPECT_TRUE(manager.listProjects().empty());
+    EXPECT_NE(output.str().find("Project deleted"), std::string::npos);
 }
 
 TEST(MenuControllerTest, DeletesProjectWhenConfirmedWithLowercaseY) {

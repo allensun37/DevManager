@@ -1,4 +1,5 @@
 #include "application/ProjectManager.h"
+#include "common/AsciiText.h"
 #include "repository/ProjectRepository.h"
 
 #include <algorithm>
@@ -8,18 +9,7 @@
 namespace {
 
 std::string normalizeTextForSearch(std::string_view value) {
-    std::string normalized;
-    normalized.reserve(value.size());
-
-    for (const unsigned char character : value) {
-        if (character >= 'A' && character <= 'Z') {
-            normalized.push_back(static_cast<char>(character - 'A' + 'a'));
-        } else {
-            normalized.push_back(static_cast<char>(character));
-        }
-    }
-
-    return normalized;
+    return devmanager::ascii::toLower(value);
 }
 
 bool isAsciiLetterOrDigit(unsigned char character) {
@@ -44,14 +34,10 @@ std::string normalizeTechnologyForSearch(std::string_view value) {
             continue;
         }
 
-        if (character >= 'A' && character <= 'Z') {
-            normalized.push_back(static_cast<char>(character - 'A' + 'a'));
-        } else {
-            normalized.push_back(static_cast<char>(character));
-        }
+        normalized.push_back(static_cast<char>(character));
     }
 
-    return normalized;
+    return devmanager::ascii::toLower(normalized);
 }
 
 }  // namespace
@@ -59,7 +45,7 @@ std::string normalizeTechnologyForSearch(std::string_view value) {
 namespace devmanager {
 
 ProjectManager::ProjectManager(ProjectRepository& repository) : repository_(&repository) {
-    const ProjectStore store = repository_->load();
+    const ProjectStore store = repository_->loadStore();
     projects_ = store.projects;
     nextId_ = store.nextId;
 }
@@ -136,7 +122,7 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
 
 void ProjectManager::saveCurrentState() const {
     if (repository_ != nullptr) {
-        repository_->save(ProjectStore {nextId_, projects_});
+        repository_->saveStore(ProjectStore {nextId_, projects_});
     }
 }
 

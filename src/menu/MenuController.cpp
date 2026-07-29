@@ -1,28 +1,14 @@
 #include "menu/MenuController.h"
 
+#include "common/AsciiText.h"
+
 #include <algorithm>
-#include <cctype>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
-
-std::string trim(std::string value) {
-    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    });
-    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    }).base();
-
-    if (first >= last) {
-        return {};
-    }
-
-    return {first, last};
-}
 
 std::vector<std::string> splitTechnologyTags(const std::string& input) {
     std::vector<std::string> tags;
@@ -32,7 +18,7 @@ std::vector<std::string> splitTechnologyTags(const std::string& input) {
         const std::size_t delimiter = input.find(',', start);
         const std::size_t length = delimiter == std::string::npos ? std::string::npos
                                                                    : delimiter - start;
-        tags.push_back(trim(input.substr(start, length)));
+        tags.push_back(devmanager::ascii::trim(input.substr(start, length)));
         if (delimiter == std::string::npos) {
             return tags;
         }
@@ -43,7 +29,7 @@ std::vector<std::string> splitTechnologyTags(const std::string& input) {
 }
 
 std::optional<devmanager::ProjectId> parseProjectId(const std::string& input) {
-    const std::string trimmed = trim(input);
+    const std::string trimmed = devmanager::ascii::trim(input);
     if (trimmed.empty()) {
         return std::nullopt;
     }

@@ -1,5 +1,6 @@
 #include "application/ProjectManager.h"
 #include "repository/JsonProjectRepository.h"
+#include "repository/ProjectRepository.h"
 
 #include <gtest/gtest.h>
 
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -37,6 +39,29 @@ protected:
     }
 
     std::filesystem::path persistenceDirectory;
+};
+
+class RecordingProjectRepository final : public devmanager::ProjectRepository {
+public:
+    explicit RecordingProjectRepository(devmanager::ProjectStore initialStore)
+        : initialStore_(std::move(initialStore)) {
+    }
+
+    [[nodiscard]] devmanager::ProjectStore loadStore() const override {
+        return initialStore_;
+    }
+
+    void saveStore(const devmanager::ProjectStore& store) const override {
+        savedStores_.push_back(store);
+    }
+
+    [[nodiscard]] const std::vector<devmanager::ProjectStore>& savedStores() const {
+        return savedStores_;
+    }
+
+private:
+    devmanager::ProjectStore initialStore_;
+    mutable std::vector<devmanager::ProjectStore> savedStores_;
 };
 
 TEST_F(ProjectManagerTest, AssignsIncreasingIdsAndKeepsInsertionOrder) {
@@ -113,6 +138,23 @@ TEST_F(ProjectManagerTest, RestoresProjectsAndNextIdFromRepository) {
                                              "计划中"),
                   2);
     }
+}
+
+TEST(ProjectManagerRepositoryContractTest, LoadsAndSavesWholeProjectStores) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Existing", {"C++"}, "Already saved.", "开发中"}}},
+    };
+    devmanager::ProjectManager manager(repository);
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.addProject("New project", {"CMake"}, "New description.", "计划中"), 2);
+
+    ASSERT_EQ(repository.savedStores().size(), 1U);
+    const devmanager::ProjectStore& savedStore = repository.savedStores().front();
+    EXPECT_EQ(savedStore.nextId, 3);
+    ASSERT_EQ(savedStore.projects.size(), 2U);
+    EXPECT_EQ(savedStore.projects[0].id(), 1);
+    EXPECT_EQ(savedStore.projects[1].id(), 2);
 }
 
 }  // namespace

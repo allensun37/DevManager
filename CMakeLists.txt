@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -21,10 +25,16 @@ set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.17.0
+    # GoogleTest v1.17.0
+    GIT_TAG 52eb8108c5bdec04579160ae17225d66034bd723
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(googletest)
+
+add_library(DevManagerCommon src/common/AsciiText.cpp)
+target_include_directories(DevManagerCommon PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
 add_library(DevManagerDomain src/domain/Project.cpp)
 target_include_directories(DevManagerDomain PUBLIC
@@ -36,7 +46,7 @@ add_library(DevManagerApplication src/application/ProjectManager.cpp)
 target_include_directories(DevManagerApplication PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(DevManagerApplication PUBLIC DevManagerDomain)
+target_link_libraries(DevManagerApplication PUBLIC DevManagerCommon DevManagerDomain)
 
 add_library(DevManagerRepository src/repository/JsonProjectRepository.cpp)
 target_include_directories(DevManagerRepository PUBLIC
@@ -48,7 +58,7 @@ add_library(DevManagerMenu src/menu/MenuController.cpp)
 target_include_directories(DevManagerMenu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(DevManagerMenu PUBLIC DevManagerApplication)
+target_link_libraries(DevManagerMenu PUBLIC DevManagerApplication DevManagerCommon)
 
 add_executable(DevManager src/main.cpp)
 target_link_libraries(DevManager PRIVATE
@@ -66,6 +76,13 @@ set_tests_properties(DevManagerSmoke PROPERTIES
 add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
 target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain GTest::gtest_main)
 gtest_discover_tests(DevManagerProjectTests)
+
+add_executable(DevManagerAsciiTextTests tests/common/AsciiTextTests.cpp)
+target_include_directories(DevManagerAsciiTextTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerAsciiTextTests PRIVATE DevManagerCommon GTest::gtest_main)
+gtest_discover_tests(DevManagerAsciiTextTests)
 
 add_executable(DevManagerProjectManagerTests
     tests/application/ProjectManagerTests.cpp
