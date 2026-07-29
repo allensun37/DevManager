@@ -21,8 +21,7 @@ set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    # GoogleTest v1.17.0
-    GIT_TAG 52eb8108c5bdec04579160ae17225d66034bd723
+    GIT_TAG v1.17.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(googletest)
