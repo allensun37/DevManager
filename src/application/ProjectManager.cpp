@@ -71,6 +71,30 @@ ProjectId ProjectManager::addProject(std::string name,
     return id;
 }
 
+bool ProjectManager::updateProject(ProjectId id,
+                                   std::string name,
+                                   std::vector<std::string> techStack,
+                                   std::string description,
+                                   std::string status) {
+    const auto iterator = std::find_if(projects_.begin(), projects_.end(),
+                                       [id](const Project& project) {
+                                           return project.id() == id;
+                                       });
+    if (iterator == projects_.end()) {
+        return false;
+    }
+
+    ProjectStore candidate{nextId_, projects_};
+    const std::size_t index = static_cast<std::size_t>(std::distance(projects_.begin(), iterator));
+    candidate.projects[index] = Project{id,
+                                        std::move(name),
+                                        std::move(techStack),
+                                        std::move(description),
+                                        std::move(status)};
+    commitCandidate(std::move(candidate));
+    return true;
+}
+
 bool ProjectManager::deleteProject(ProjectId id) {
     const auto iterator = std::find_if(projects_.begin(), projects_.end(),
                                        [id](const Project& project) {
@@ -126,6 +150,42 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
     }
 
     return matches;
+}
+
+std::vector<Project> ProjectManager::filterByStatus(std::string_view status) const {
+    const std::string normalizedStatus = ascii::toLower(ascii::trim(status));
+    if (normalizedStatus.empty()) {
+        return {};
+    }
+
+    std::vector<Project> matches;
+    for (const Project& project : projects_) {
+        if (ascii::toLower(ascii::trim(project.status())) == normalizedStatus) {
+            matches.push_back(project);
+        }
+    }
+    return matches;
+}
+
+std::vector<Project> ProjectManager::sortedProjects(ProjectSortKey key) const {
+    std::vector<Project> sorted = projects_;
+    std::sort(sorted.begin(), sorted.end(), [key](const Project& left, const Project& right) {
+        if (key == ProjectSortKey::Id) {
+            return left.id() < right.id();
+        }
+
+        const std::string leftValue = key == ProjectSortKey::Name
+                                          ? ascii::toLower(left.name())
+                                          : ascii::toLower(left.status());
+        const std::string rightValue = key == ProjectSortKey::Name
+                                           ? ascii::toLower(right.name())
+                                           : ascii::toLower(right.status());
+        if (leftValue == rightValue) {
+            return left.id() < right.id();
+        }
+        return leftValue < rightValue;
+    });
+    return sorted;
 }
 
 void ProjectManager::commitCandidate(ProjectStore candidate) {

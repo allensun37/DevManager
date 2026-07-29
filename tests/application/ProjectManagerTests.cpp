@@ -235,4 +235,142 @@ TEST(ProjectManagerPersistenceTest, RejectsAnAddWhenNextIdIsAtTheMaximum) {
     EXPECT_TRUE(repository.savedStores().empty());
 }
 
+TEST(ProjectManagerEditTest, ReplacesEveryEditableFieldWithoutChangingTheId) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Original", {"C++"}, "Old description", "Planned"}}},
+    };
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_TRUE(manager.updateProject(1,
+                                      "Updated",
+                                      {"C++", "CMake"},
+                                      "New description",
+                                      "In progress"));
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    const devmanager::Project& updated = manager.listProjects().front();
+    EXPECT_EQ(updated.id(), 1);
+    EXPECT_EQ(updated.name(), "Updated");
+    EXPECT_EQ(updated.techStack(), (std::vector<std::string>{"C++", "CMake"}));
+    EXPECT_EQ(updated.description(), "New description");
+    EXPECT_EQ(updated.status(), "In progress");
+    ASSERT_EQ(repository.savedStores().size(), 1U);
+    EXPECT_EQ(repository.savedStores().front().projects.front().id(), 1);
+    EXPECT_EQ(repository.savedStores().front().nextId, 2);
+}
+
+TEST(ProjectManagerEditTest, ReportsMissingIdsWithoutSaving) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Existing", {"C++"}, "Description", "Planned"}}},
+    };
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_FALSE(manager.updateProject(99, "Updated", {"CMake"}, "Description", "In progress"));
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects().front().name(), "Existing");
+    EXPECT_TRUE(repository.savedStores().empty());
+}
+
+TEST(ProjectManagerEditTest, RollsBackAnEditWhenSavingFails) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Original", {"C++"}, "Old description", "Planned"}}},
+    };
+    repository.setFailSaves(true);
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_THROW(static_cast<void>(manager.updateProject(1,
+                                                          "Updated",
+                                                          {"CMake"},
+                                                          "New description",
+                                                          "In progress")),
+                 std::runtime_error);
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects().front().name(), "Original");
+    EXPECT_EQ(manager.listProjects().front().techStack(), (std::vector<std::string>{"C++"}));
+    EXPECT_TRUE(repository.savedStores().empty());
+}
+
+TEST(ProjectManagerEditTest, AllowsAnEditToClearTheDescription) {
+    devmanager::ProjectManager manager;
+    const devmanager::ProjectId id =
+        manager.addProject("Project", {"C++"}, "Description", "Planned");
+
+    EXPECT_TRUE(manager.updateProject(id, "Project", {"C++"}, "", "In progress"));
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_TRUE(manager.listProjects().front().description().empty());
+}
+
+TEST(ProjectManagerEditTest, RejectsInvalidEditsWithoutSavingOrChangingMemory) {
+    RecordingProjectRepository repository{
+        {2, {devmanager::Project{1, "Original", {"C++"}, "Description", "Planned"}}},
+    };
+    devmanager::ProjectManager manager(repository);
+
+    EXPECT_THROW(static_cast<void>(manager.updateProject(1,
+                                                          "",
+                                                          {"C++"},
+                                                          "New description",
+                                                          "In progress")),
+                 std::invalid_argument);
+
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects().front().name(), "Original");
+    EXPECT_TRUE(repository.savedStores().empty());
+}
+
+TEST(ProjectManagerQueryTest, FiltersStatusWithAsciiNormalizationWithoutReorderingStoredProjects) {
+    devmanager::ProjectManager manager;
+    static_cast<void>(manager.addProject("First", {"C++"}, "Description", "Planned"));
+    static_cast<void>(manager.addProject("Second", {"CMake"}, "Description", "In Progress"));
+    static_cast<void>(manager.addProject("Third", {"C++"}, "Description", "in progress"));
+
+    const std::vector<devmanager::Project> matches = manager.filterByStatus(" \tIN PROGRESS\r\n");
+
+    ASSERT_EQ(matches.size(), 2U);
+    EXPECT_EQ(matches[0].id(), 2);
+    EXPECT_EQ(matches[1].id(), 3);
+    EXPECT_TRUE(manager.filterByStatus("").empty());
+    ASSERT_EQ(manager.listProjects().size(), 3U);
+    EXPECT_EQ(manager.listProjects()[0].id(), 1);
+    EXPECT_EQ(manager.listProjects()[1].id(), 2);
+    EXPECT_EQ(manager.listProjects()[2].id(), 3);
+}
+
+TEST(ProjectManagerQueryTest, SortsCopiesByEachSupportedKeyWithIdTieBreakers) {
+    devmanager::ProjectManager manager;
+    static_cast<void>(manager.addProject("zeta", {"C++"}, "Description", "Planned"));
+    static_cast<void>(manager.addProject("Alpha", {"CMake"}, "Description", "In Progress"));
+    static_cast<void>(manager.addProject("alpha", {"Linux"}, "Description", "in progress"));
+
+    const std::vector<devmanager::Project> byId =
+        manager.sortedProjects(devmanager::ProjectSortKey::Id);
+    const std::vector<devmanager::Project> byName =
+        manager.sortedProjects(devmanager::ProjectSortKey::Name);
+    const std::vector<devmanager::Project> byStatus =
+        manager.sortedProjects(devmanager::ProjectSortKey::Status);
+
+    ASSERT_EQ(byId.size(), 3U);
+    EXPECT_EQ(byId[0].id(), 1);
+    EXPECT_EQ(byId[1].id(), 2);
+    EXPECT_EQ(byId[2].id(), 3);
+
+    ASSERT_EQ(byName.size(), 3U);
+    EXPECT_EQ(byName[0].id(), 2);
+    EXPECT_EQ(byName[1].id(), 3);
+    EXPECT_EQ(byName[2].id(), 1);
+
+    ASSERT_EQ(byStatus.size(), 3U);
+    EXPECT_EQ(byStatus[0].id(), 2);
+    EXPECT_EQ(byStatus[1].id(), 3);
+    EXPECT_EQ(byStatus[2].id(), 1);
+
+    ASSERT_EQ(manager.listProjects().size(), 3U);
+    EXPECT_EQ(manager.listProjects()[0].id(), 1);
+    EXPECT_EQ(manager.listProjects()[1].id(), 2);
+    EXPECT_EQ(manager.listProjects()[2].id(), 3);
+}
+
 }  // namespace
