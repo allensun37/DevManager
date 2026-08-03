@@ -33,6 +33,9 @@ add_library(CppHttplib INTERFACE)
 target_include_directories(CppHttplib INTERFACE
     ${cpp_httplib_SOURCE_DIR}
 )
+if(WIN32)
+    target_link_libraries(CppHttplib INTERFACE ws2_32)
+endif()
 
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
@@ -138,6 +141,8 @@ gtest_discover_tests(DevManagerMenuTests)
 add_library(DevManagerHttp
     src/http/HttpError.cpp
     src/http/ProjectHttpJsonMapper.cpp
+    src/http/HttpServer.cpp
+    src/http/ProjectHttpController.cpp
 )
 target_include_directories(DevManagerHttp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -160,3 +165,28 @@ target_link_libraries(DevManagerProjectHttpJsonMapperTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerProjectHttpJsonMapperTests)
+
+add_executable(DevManagerProjectHttpControllerTests
+    tests/http/ProjectHttpControllerTests.cpp
+)
+target_include_directories(DevManagerProjectHttpControllerTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectHttpControllerTests PRIVATE
+    DevManagerHttp
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectHttpControllerTests)
+
+add_executable(DevManagerHttpServerIntegrationTests
+    tests/http/HttpServerIntegrationTests.cpp
+)
+target_include_directories(DevManagerHttpServerIntegrationTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerHttpServerIntegrationTests PRIVATE
+    DevManagerHttp
+    CppHttplib
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerHttpServerIntegrationTests)

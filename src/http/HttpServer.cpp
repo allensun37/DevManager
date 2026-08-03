@@ -1,0 +1,54 @@
+#include "http/HttpServer.h"
+
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace devmanager {
+
+HttpServer::HttpServer(ProjectManager& manager, std::string host, std::uint16_t port)
+    : manager_(manager),
+      host_(std::move(host)),
+      requestedPort_(port),
+      controller_(manager_) {}
+
+void HttpServer::bind() {
+    if (bound_) {
+        throw std::logic_error("HTTP server is already bound");
+    }
+
+    controller_.registerRoutes(server_);
+
+    const int actualPort = requestedPort_ == 0
+                               ? server_.bind_to_any_port(host_)
+                               : (server_.bind_to_port(host_, requestedPort_)
+                                      ? static_cast<int>(requestedPort_)
+                                      : -1);
+    if (actualPort <= 0) {
+        throw std::runtime_error("Failed to bind HTTP server to " + host_ + ":" +
+                                 std::to_string(requestedPort_));
+    }
+
+    boundPort_ = static_cast<std::uint16_t>(actualPort);
+    bound_ = true;
+}
+
+void HttpServer::run() {
+    if (!bound_) {
+        throw std::logic_error("HTTP server must be bound before run");
+    }
+
+    static_cast<void>(server_.listen_after_bind());
+}
+
+void HttpServer::stop() noexcept {
+    if (bound_) {
+        server_.stop();
+    }
+}
+
+std::uint16_t HttpServer::boundPort() const noexcept {
+    return boundPort_;
+}
+
+}  // namespace devmanager
