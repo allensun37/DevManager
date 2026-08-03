@@ -189,6 +189,36 @@ TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
     expectJsonContentType(*repeatedResponse);
     EXPECT_EQ(nlohmann::json::parse(repeatedResponse->body).at("error").at("code"),
               "invalid_query");
+
+    const auto repeatedSameNameResponse = get(server, "/api/projects?name=one&name=one");
+    ASSERT_TRUE(repeatedSameNameResponse);
+    ASSERT_EQ(repeatedSameNameResponse->status, 400);
+    expectJsonContentType(*repeatedSameNameResponse);
+    EXPECT_EQ(nlohmann::json::parse(repeatedSameNameResponse->body)
+                  .at("error")
+                  .at("code"),
+              "invalid_query");
+
+    const auto repeatedSortResponse = get(server, "/api/projects?sort=name&sort=name");
+    ASSERT_TRUE(repeatedSortResponse);
+    ASSERT_EQ(repeatedSortResponse->status, 400);
+    expectJsonContentType(*repeatedSortResponse);
+    EXPECT_EQ(nlohmann::json::parse(repeatedSortResponse->body).at("error").at("code"),
+              "invalid_query");
+
+    const auto emptyValueResponse = get(server, "/api/projects?name=");
+    ASSERT_TRUE(emptyValueResponse);
+    ASSERT_EQ(emptyValueResponse->status, 400);
+    expectJsonContentType(*emptyValueResponse);
+    EXPECT_EQ(nlohmann::json::parse(emptyValueResponse->body).at("error").at("code"),
+              "invalid_query");
+
+    const auto encodedDelimiterResponse =
+        get(server, "/api/projects?name=one%26name=one");
+    ASSERT_TRUE(encodedDelimiterResponse);
+    ASSERT_EQ(encodedDelimiterResponse->status, 200);
+    expectJsonContentType(*encodedDelimiterResponse);
+    EXPECT_TRUE(nlohmann::json::parse(encodedDelimiterResponse->body).is_array());
 }
 
 TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {

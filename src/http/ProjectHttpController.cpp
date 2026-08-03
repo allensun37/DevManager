@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <exception>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,43 @@ void sendException(httplib::Response& response, const std::exception& error) {
     return key == "name" || key == "technology" || key == "status";
 }
 
+[[nodiscard]] bool hasRepeatedRawQueryKey(const httplib::Request& request) {
+    const std::size_t queryStart = request.target.find('?');
+    if (queryStart == std::string::npos) {
+        return false;
+    }
+
+    const std::string_view query(request.target.data() + queryStart + 1,
+                                 request.target.size() - queryStart - 1);
+    std::map<std::string, std::size_t> keyCounts;
+    std::size_t pairStart = 0;
+    while (pairStart <= query.size()) {
+        const std::size_t pairEnd = query.find('&', pairStart);
+        const std::size_t end = pairEnd == std::string_view::npos
+                                    ? query.size()
+                                    : pairEnd;
+        const std::string_view pair = query.substr(pairStart, end - pairStart);
+        const std::size_t equals = pair.find('=');
+        const std::size_t keyEnd = equals == std::string_view::npos
+                                       ? pair.size()
+                                       : equals;
+        if (keyEnd > 0U) {
+            const std::string decodedKey = httplib::decode_query_component(
+                std::string(pair.substr(0, keyEnd)));
+            if (++keyCounts[decodedKey] > 1U) {
+                return true;
+            }
+        }
+
+        if (pairEnd == std::string_view::npos) {
+            break;
+        }
+        pairStart = pairEnd + 1;
+    }
+
+    return false;
+}
+
 [[nodiscard]] std::optional<ProjectSortKey> parseSortKey(std::string_view value) {
     if (value == "id") {
         return ProjectSortKey::Id;
@@ -76,6 +114,10 @@ void sendException(httplib::Response& response, const std::exception& error) {
 [[nodiscard]] bool validateQuery(const httplib::Request& request,
                                  std::optional<ProjectSortKey>& sortKey,
                                  std::string& filterKey) {
+    if (hasRepeatedRawQueryKey(request)) {
+        return false;
+    }
+
     std::size_t filterCount = 0;
 
     for (const auto& parameter : request.params) {
