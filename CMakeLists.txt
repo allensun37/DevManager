@@ -134,3 +134,29 @@ add_executable(DevManagerMenuTests
 )
 target_link_libraries(DevManagerMenuTests PRIVATE DevManagerMenu GTest::gtest_main)
 gtest_discover_tests(DevManagerMenuTests)
+
+add_library(DevManagerHttp
+    src/http/HttpError.cpp
+    src/http/ProjectHttpJsonMapper.cpp
+)
+target_include_directories(DevManagerHttp PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerHttp PUBLIC
+    DevManagerApplication
+    DevManagerRepository
+    DevManagerCommon
+    CppHttplib
+)
+
+add_executable(DevManagerProjectHttpJsonMapperTests
+    tests/http/ProjectHttpJsonMapperTests.cpp
+)
+target_include_directories(DevManagerProjectHttpJsonMapperTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectHttpJsonMapperTests PRIVATE
+    DevManagerHttp
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectHttpJsonMapperTests)
