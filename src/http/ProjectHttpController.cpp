@@ -81,6 +81,9 @@ void sendException(httplib::Response& response, const std::exception& error) {
         const std::size_t keyEnd = equals == std::string_view::npos
                                        ? pair.size()
                                        : equals;
+        if (!pair.empty() && keyEnd == 0U) {
+            return true;
+        }
         if (keyEnd > 0U) {
             const std::string decodedKey = httplib::decode_query_component(
                 std::string(pair.substr(0, keyEnd)));

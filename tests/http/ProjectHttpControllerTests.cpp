@@ -51,6 +51,7 @@ private:
 httplib::Result get(devmanager::HttpServer& server, const std::string& path) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_path_encode(false);
     return client.Get(path);
 }
 
@@ -181,6 +182,13 @@ TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
     ASSERT_EQ(unknownResponse->status, 400);
     expectJsonContentType(*unknownResponse);
     EXPECT_EQ(nlohmann::json::parse(unknownResponse->body).at("error").at("code"),
+              "invalid_query");
+
+    const auto emptyKeyResponse = get(server, "/api/projects?=value");
+    ASSERT_TRUE(emptyKeyResponse);
+    ASSERT_EQ(emptyKeyResponse->status, 400);
+    expectJsonContentType(*emptyKeyResponse);
+    EXPECT_EQ(nlohmann::json::parse(emptyKeyResponse->body).at("error").at("code"),
               "invalid_query");
 
     const auto repeatedResponse = get(server, "/api/projects?name=one&name=two");
