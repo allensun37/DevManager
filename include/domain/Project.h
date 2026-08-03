@@ -1,14 +1,13 @@
 #pragma once
 
+#include "common/ProjectId.h"
+
 #include <nlohmann/json.hpp>
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace devmanager {
-
-using ProjectId = std::uint64_t;
 
 class Project {
 public:
