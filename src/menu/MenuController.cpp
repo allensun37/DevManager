@@ -1,28 +1,16 @@
 #include "menu/MenuController.h"
 
+#include "common/AsciiText.h"
+
 #include <algorithm>
-#include <cctype>
+#include <exception>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
-
-std::string trim(std::string value) {
-    const auto first = std::find_if_not(value.begin(), value.end(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    });
-    const auto last = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char character) {
-        return std::isspace(character) != 0;
-    }).base();
-
-    if (first >= last) {
-        return {};
-    }
-
-    return {first, last};
-}
 
 std::vector<std::string> splitTechnologyTags(const std::string& input) {
     std::vector<std::string> tags;
@@ -32,7 +20,7 @@ std::vector<std::string> splitTechnologyTags(const std::string& input) {
         const std::size_t delimiter = input.find(',', start);
         const std::size_t length = delimiter == std::string::npos ? std::string::npos
                                                                    : delimiter - start;
-        tags.push_back(trim(input.substr(start, length)));
+        tags.push_back(devmanager::ascii::trim(input.substr(start, length)));
         if (delimiter == std::string::npos) {
             return tags;
         }
@@ -43,15 +31,19 @@ std::vector<std::string> splitTechnologyTags(const std::string& input) {
 }
 
 std::optional<devmanager::ProjectId> parseProjectId(const std::string& input) {
-    const std::string trimmed = trim(input);
+    const std::string trimmed = devmanager::ascii::trim(input);
     if (trimmed.empty()) {
+        return std::nullopt;
+    }
+    if (trimmed.front() == '+' || trimmed.front() == '-') {
         return std::nullopt;
     }
 
     try {
         std::size_t parsedCharacters = 0;
         const unsigned long long value = std::stoull(trimmed, &parsedCharacters);
-        if (parsedCharacters != trimmed.size() || value == 0) {
+        if (parsedCharacters != trimmed.size() || value == 0 ||
+            value > std::numeric_limits<devmanager::ProjectId>::max()) {
             return std::nullopt;
         }
         return static_cast<devmanager::ProjectId>(value);
@@ -77,21 +69,28 @@ void MenuController::run() {
             return;
         }
 
-        if (command == "0") {
+        const std::string normalizedCommand = ascii::trim(command);
+        if (normalizedCommand == "0") {
             output_ << "Goodbye\n";
             return;
         }
 
-        if (command == "1") {
+        if (normalizedCommand == "1") {
             listProjects();
-        } else if (command == "2") {
+        } else if (normalizedCommand == "2") {
             addProject();
-        } else if (command == "3") {
+        } else if (normalizedCommand == "3") {
             deleteProject();
-        } else if (command == "4") {
+        } else if (normalizedCommand == "4") {
             searchByName();
-        } else if (command == "5") {
+        } else if (normalizedCommand == "5") {
             searchByTechnology();
+        } else if (normalizedCommand == "6") {
+            editProject();
+        } else if (normalizedCommand == "7") {
+            filterByStatus();
+        } else if (normalizedCommand == "8") {
+            sortProjects();
         } else {
             output_ << "Invalid command\n";
         }
@@ -105,6 +104,9 @@ void MenuController::printMenu() const {
             << "3. Delete a project\n"
             << "4. Search by name\n"
             << "5. Search by technology\n"
+            << "6. Edit a project\n"
+            << "7. Filter by status\n"
+            << "8. Sort projects\n"
             << "0. Exit\n"
             << "Select: ";
 }
@@ -112,6 +114,20 @@ void MenuController::printMenu() const {
 bool MenuController::readLine(const std::string& prompt, std::string& value) const {
     output_ << prompt;
     return static_cast<bool>(std::getline(input_, value));
+}
+
+std::optional<ProjectId> MenuController::readProjectId() const {
+    std::string idInput;
+    while (readLine("Project ID: ", idInput)) {
+        const std::optional<ProjectId> id = parseProjectId(idInput);
+        if (id.has_value()) {
+            return id;
+        }
+        output_ << "Invalid project ID\n";
+    }
+
+    output_ << "Input ended\n";
+    return std::nullopt;
 }
 
 void MenuController::listProjects() const {
@@ -135,27 +151,23 @@ void MenuController::addProject() {
         output_ << "Project added with ID " << id << '\n';
     } catch (const std::invalid_argument& error) {
         output_ << "Invalid project: " << error.what() << '\n';
+    } catch (const std::exception& error) {
+        output_ << "Operation failed: " << error.what() << '\n';
     }
 }
 
 void MenuController::deleteProject() {
-    std::string idInput;
-    if (!readLine("Project ID: ", idInput)) {
-        output_ << "Input ended\n";
-        return;
-    }
-
-    const std::optional<ProjectId> id = parseProjectId(idInput);
+    const std::optional<ProjectId> id = readProjectId();
     if (!id.has_value()) {
-        output_ << "Invalid project ID\n";
         return;
     }
 
-    const auto project = std::find_if(manager_.listProjects().begin(), manager_.listProjects().end(),
+    const std::vector<Project> projects = manager_.listProjects();
+    const auto project = std::find_if(projects.begin(), projects.end(),
                                       [id](const Project& item) {
                                           return item.id() == *id;
                                       });
-    if (project == manager_.listProjects().end()) {
+    if (project == projects.end()) {
         output_ << "Project ID not found\n";
         return;
     }
@@ -165,13 +177,56 @@ void MenuController::deleteProject() {
         output_ << "Input ended\n";
         return;
     }
-    if (confirmation != "y") {
+    if (confirmation != "y" && confirmation != "Y") {
         output_ << "Deletion cancelled\n";
         return;
     }
 
-    static_cast<void>(manager_.deleteProject(*id));
-    output_ << "Project deleted\n";
+    try {
+        static_cast<void>(manager_.deleteProject(*id));
+        output_ << "Project deleted\n";
+    } catch (const std::exception& error) {
+        output_ << "Operation failed: " << error.what() << '\n';
+    }
+}
+
+void MenuController::editProject() {
+    const std::optional<ProjectId> id = readProjectId();
+    if (!id.has_value()) {
+        return;
+    }
+
+    const std::vector<Project> projects = manager_.listProjects();
+    const auto project = std::find_if(projects.begin(), projects.end(),
+                                      [id](const Project& item) {
+                                          return item.id() == *id;
+                                      });
+    if (project == projects.end()) {
+        output_ << "Project ID not found\n";
+        return;
+    }
+
+    printProjects({*project});
+
+    std::string name;
+    std::string technologyTags;
+    std::string description;
+    std::string status;
+    if (!readLine("Name: ", name) || !readLine("Technology tags (comma separated): ", technologyTags) ||
+        !readLine("Description: ", description) || !readLine("Status: ", status)) {
+        output_ << "Input ended\n";
+        return;
+    }
+
+    try {
+        static_cast<void>(manager_.updateProject(*id, std::move(name), splitTechnologyTags(technologyTags),
+                                                 std::move(description), std::move(status)));
+        output_ << "Project updated\n";
+    } catch (const std::invalid_argument& error) {
+        output_ << "Invalid project: " << error.what() << '\n';
+    } catch (const std::exception& error) {
+        output_ << "Operation failed: " << error.what() << '\n';
+    }
 }
 
 void MenuController::searchByName() const {
@@ -190,6 +245,34 @@ void MenuController::searchByTechnology() const {
         return;
     }
     printProjects(manager_.searchByTechnology(query));
+}
+
+void MenuController::filterByStatus() const {
+    std::string status;
+    if (!readLine("Status: ", status)) {
+        output_ << "Input ended\n";
+        return;
+    }
+    printProjects(manager_.filterByStatus(status));
+}
+
+void MenuController::sortProjects() const {
+    std::string key;
+    if (!readLine("Sort by (id/name/status): ", key)) {
+        output_ << "Input ended\n";
+        return;
+    }
+
+    const std::string normalizedKey = ascii::toLower(ascii::trim(key));
+    if (normalizedKey == "id") {
+        printProjects(manager_.sortedProjects(ProjectSortKey::Id));
+    } else if (normalizedKey == "name") {
+        printProjects(manager_.sortedProjects(ProjectSortKey::Name));
+    } else if (normalizedKey == "status") {
+        printProjects(manager_.sortedProjects(ProjectSortKey::Status));
+    } else {
+        output_ << "Invalid sort key\n";
+    }
 }
 
 void MenuController::printProjects(const std::vector<Project>& projects) const {

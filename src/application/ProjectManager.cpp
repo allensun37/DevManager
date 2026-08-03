@@ -1,25 +1,17 @@
 #include "application/ProjectManager.h"
+#include "common/AsciiText.h"
 #include "repository/ProjectRepository.h"
 
 #include <algorithm>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace {
 
 std::string normalizeTextForSearch(std::string_view value) {
-    std::string normalized;
-    normalized.reserve(value.size());
-
-    for (const unsigned char character : value) {
-        if (character >= 'A' && character <= 'Z') {
-            normalized.push_back(static_cast<char>(character - 'A' + 'a'));
-        } else {
-            normalized.push_back(static_cast<char>(character));
-        }
-    }
-
-    return normalized;
+    return devmanager::ascii::toLower(value);
 }
 
 bool isAsciiLetterOrDigit(unsigned char character) {
@@ -44,14 +36,10 @@ std::string normalizeTechnologyForSearch(std::string_view value) {
             continue;
         }
 
-        if (character >= 'A' && character <= 'Z') {
-            normalized.push_back(static_cast<char>(character - 'A' + 'a'));
-        } else {
-            normalized.push_back(static_cast<char>(character));
-        }
+        normalized.push_back(static_cast<char>(character));
     }
 
-    return normalized;
+    return devmanager::ascii::toLower(normalized);
 }
 
 }  // namespace
@@ -59,7 +47,7 @@ std::string normalizeTechnologyForSearch(std::string_view value) {
 namespace devmanager {
 
 ProjectManager::ProjectManager(ProjectRepository& repository) : repository_(&repository) {
-    const ProjectStore store = repository_->load();
+    const ProjectStore store = repository_->loadStore();
     projects_ = store.projects;
     nextId_ = store.nextId;
 }
@@ -68,15 +56,43 @@ ProjectId ProjectManager::addProject(std::string name,
                                      std::vector<std::string> techStack,
                                      std::string description,
                                      std::string status) {
+    if (nextId_ == std::numeric_limits<ProjectId>::max()) {
+        throw std::overflow_error("Project ID space is exhausted");
+    }
+
     const ProjectId id = nextId_;
-    projects_.emplace_back(id,
-                           std::move(name),
-                           std::move(techStack),
-                           std::move(description),
-                           std::move(status));
-    ++nextId_;
-    saveCurrentState();
+    ProjectStore candidate{nextId_ + 1, projects_};
+    candidate.projects.emplace_back(id,
+                                    std::move(name),
+                                    std::move(techStack),
+                                    std::move(description),
+                                    std::move(status));
+    commitCandidate(std::move(candidate));
     return id;
+}
+
+bool ProjectManager::updateProject(ProjectId id,
+                                   std::string name,
+                                   std::vector<std::string> techStack,
+                                   std::string description,
+                                   std::string status) {
+    const auto iterator = std::find_if(projects_.begin(), projects_.end(),
+                                       [id](const Project& project) {
+                                           return project.id() == id;
+                                       });
+    if (iterator == projects_.end()) {
+        return false;
+    }
+
+    ProjectStore candidate{nextId_, projects_};
+    const std::size_t index = static_cast<std::size_t>(std::distance(projects_.begin(), iterator));
+    candidate.projects[index] = Project{id,
+                                        std::move(name),
+                                        std::move(techStack),
+                                        std::move(description),
+                                        std::move(status)};
+    commitCandidate(std::move(candidate));
+    return true;
 }
 
 bool ProjectManager::deleteProject(ProjectId id) {
@@ -88,8 +104,10 @@ bool ProjectManager::deleteProject(ProjectId id) {
         return false;
     }
 
-    projects_.erase(iterator);
-    saveCurrentState();
+    ProjectStore candidate{nextId_, projects_};
+    candidate.projects.erase(candidate.projects.begin() +
+                             std::distance(projects_.begin(), iterator));
+    commitCandidate(std::move(candidate));
     return true;
 }
 
@@ -134,10 +152,49 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
     return matches;
 }
 
-void ProjectManager::saveCurrentState() const {
-    if (repository_ != nullptr) {
-        repository_->save(ProjectStore {nextId_, projects_});
+std::vector<Project> ProjectManager::filterByStatus(std::string_view status) const {
+    const std::string normalizedStatus = ascii::toLower(ascii::trim(status));
+    if (normalizedStatus.empty()) {
+        return {};
     }
+
+    std::vector<Project> matches;
+    for (const Project& project : projects_) {
+        if (ascii::toLower(ascii::trim(project.status())) == normalizedStatus) {
+            matches.push_back(project);
+        }
+    }
+    return matches;
+}
+
+std::vector<Project> ProjectManager::sortedProjects(ProjectSortKey key) const {
+    std::vector<Project> sorted = projects_;
+    std::sort(sorted.begin(), sorted.end(), [key](const Project& left, const Project& right) {
+        if (key == ProjectSortKey::Id) {
+            return left.id() < right.id();
+        }
+
+        const std::string leftValue = key == ProjectSortKey::Name
+                                          ? ascii::toLower(left.name())
+                                          : ascii::toLower(left.status());
+        const std::string rightValue = key == ProjectSortKey::Name
+                                           ? ascii::toLower(right.name())
+                                           : ascii::toLower(right.status());
+        if (leftValue == rightValue) {
+            return left.id() < right.id();
+        }
+        return leftValue < rightValue;
+    });
+    return sorted;
+}
+
+void ProjectManager::commitCandidate(ProjectStore candidate) {
+    if (repository_ != nullptr) {
+        repository_->saveStore(candidate);
+    }
+
+    projects_ = std::move(candidate.projects);
+    nextId_ = candidate.nextId;
 }
 
 }  // namespace devmanager

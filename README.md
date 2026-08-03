@@ -2,13 +2,15 @@
 
 DevManager 是一个使用 C++17 和 CMake 构建的命令行个人项目管理工具。
 
-v0.1 支持：
+v0.2.0 支持：
 
-- 列出、新增和删除项目；删除前需要 `y/n` 确认。
-- 按名称或技术栈搜索；搜索忽略 ASCII 大小写，`cpp` 可以匹配 `C++`。
-- 保存项目、永久 ID 和下一个可分配 ID 到 JSON 文件。
+- 列出、新增、编辑和删除项目；删除只接受 `y/Y` 确认。
+- 按名称或技术栈搜索，按状态筛选，按 ID、名称或状态升序排序。
+- 编辑保留原项目 ID；删除后的 ID 永不复用。
+- JSON 快照校验、候选状态保存、失败回滚和跨平台安全替换。
+- GoogleTest 测试套件，以及 Ubuntu 和 Windows 上的 GitHub Actions CI。
 
-暂不支持编辑、MySQL、HTTP API 和 Web 页面。
+暂不支持 HTTP API、数据库、Redis、Docker 和 Web 页面。
 
 ## 依赖
 
@@ -23,7 +25,7 @@ v0.1 支持：
 ```powershell
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --config Debug
-ctest --test-dir build --output-on-failure
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
 如果本机网络无法让 CMake 下载 `nlohmann/json`，请先准备该依赖的源码目录，再额外传入：
@@ -48,6 +50,9 @@ ctest --test-dir build --output-on-failure
 3. Delete a project
 4. Search by name
 5. Search by technology
+6. Edit a project
+7. Filter by status
+8. Sort projects
 0. Exit
 ```
 
