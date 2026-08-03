@@ -1,15 +1,19 @@
 #include "http/ProjectHttpController.h"
 
+#include "common/AsciiText.h"
 #include "common/ProjectIdParser.h"
 #include "http/HttpError.h"
 #include "http/ProjectHttpJsonMapper.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <exception>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -46,6 +50,81 @@ void sendException(httplib::Response& response, const std::exception& error) {
     sendError(response, HttpError{500, "internal_error", "Internal server error"});
 }
 
+[[nodiscard]] bool isKnownQueryParameter(std::string_view key) {
+    constexpr std::array<std::string_view, 4> knownKeys{
+        "name", "technology", "status", "sort"};
+    return std::find(knownKeys.begin(), knownKeys.end(), key) != knownKeys.end();
+}
+
+[[nodiscard]] bool isFilterParameter(std::string_view key) {
+    return key == "name" || key == "technology" || key == "status";
+}
+
+[[nodiscard]] std::optional<ProjectSortKey> parseSortKey(std::string_view value) {
+    if (value == "id") {
+        return ProjectSortKey::Id;
+    }
+    if (value == "name") {
+        return ProjectSortKey::Name;
+    }
+    if (value == "status") {
+        return ProjectSortKey::Status;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool validateQuery(const httplib::Request& request,
+                                 std::optional<ProjectSortKey>& sortKey,
+                                 std::string& filterKey) {
+    std::size_t filterCount = 0;
+
+    for (const auto& parameter : request.params) {
+        const std::string& key = parameter.first;
+        if (!isKnownQueryParameter(key) ||
+            request.get_param_value_count(key) != 1U || parameter.second.empty()) {
+            return false;
+        }
+
+        if (isFilterParameter(key)) {
+            ++filterCount;
+            filterKey = key;
+        }
+    }
+
+    if (filterCount > 1U) {
+        return false;
+    }
+
+    if (request.has_param("sort")) {
+        sortKey = parseSortKey(request.get_param_value("sort"));
+        if (!sortKey.has_value()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void sortProjects(std::vector<Project>& projects, ProjectSortKey key) {
+    std::sort(projects.begin(), projects.end(), [key](const Project& left,
+                                                       const Project& right) {
+        if (key == ProjectSortKey::Id) {
+            return left.id() < right.id();
+        }
+
+        const std::string leftValue = key == ProjectSortKey::Name
+                                          ? ascii::toLower(left.name())
+                                          : ascii::toLower(left.status());
+        const std::string rightValue = key == ProjectSortKey::Name
+                                           ? ascii::toLower(right.name())
+                                           : ascii::toLower(right.status());
+        if (leftValue == rightValue) {
+            return left.id() < right.id();
+        }
+        return leftValue < rightValue;
+    });
+}
+
 }  // namespace
 
 ProjectHttpController::ProjectHttpController(ProjectManager& manager) : manager_(manager) {}
@@ -72,13 +151,36 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
                   });
 }
 
-void ProjectHttpController::handleList(const httplib::Request& /*request*/,
+void ProjectHttpController::handleList(const httplib::Request& request,
                                        httplib::Response& response) {
     try {
+        std::optional<ProjectSortKey> sortKey;
+        std::string filterKey;
+        if (!validateQuery(request, sortKey, filterKey)) {
+            sendError(response,
+                      HttpError{400, "invalid_query", "Project query is invalid"});
+            return;
+        }
+
         std::vector<Project> projects;
         {
             std::lock_guard<std::mutex> lock(managerMutex_);
-            projects = manager_.listProjects();
+            if (filterKey == "name") {
+                projects = manager_.searchByName(request.get_param_value("name"));
+            } else if (filterKey == "technology") {
+                projects = manager_.searchByTechnology(
+                    request.get_param_value("technology"));
+            } else if (filterKey == "status") {
+                projects = manager_.filterByStatus(request.get_param_value("status"));
+            } else if (sortKey.has_value()) {
+                projects = manager_.sortedProjects(*sortKey);
+            } else {
+                projects = manager_.listProjects();
+            }
+        }
+
+        if (sortKey.has_value() && !filterKey.empty()) {
+            sortProjects(projects, *sortKey);
         }
 
         nlohmann::json payload = nlohmann::json::array();
