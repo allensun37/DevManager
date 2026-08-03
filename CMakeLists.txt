@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DevManager VERSION 0.1.0 LANGUAGES CXX)
+project(DevManager VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,7 +27,6 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/google/googletest.git
     # GoogleTest v1.17.0
     GIT_TAG 52eb8108c5bdec04579160ae17225d66034bd723
-    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(googletest)
 

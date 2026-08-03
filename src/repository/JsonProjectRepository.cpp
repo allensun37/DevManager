@@ -71,7 +71,8 @@ ProjectStore JsonProjectRepository::loadStore() const {
 
     std::ifstream input(filePath_);
     if (!input) {
-        throw std::runtime_error("Unable to open project data file for reading");
+        throw std::runtime_error("Unable to open project data file '" + filePath_.string() +
+                                 "' for reading");
     }
 
     try {

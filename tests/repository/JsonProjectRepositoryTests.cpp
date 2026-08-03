@@ -66,6 +66,18 @@ TEST_F(JsonProjectRepositoryTest, MissingDataFileCreatesAnEmptyStore) {
     EXPECT_TRUE(store.projects.empty());
 }
 
+TEST_F(JsonProjectRepositoryTest, ReportsTheDataPathWhenItCannotBeOpened) {
+    ASSERT_TRUE(std::filesystem::create_directories(filePath));
+    const devmanager::JsonProjectRepository repository(filePath);
+
+    try {
+        static_cast<void>(repository.loadStore());
+        FAIL() << "Expected the directory path to be rejected as a data file";
+    } catch (const std::exception& error) {
+        EXPECT_NE(std::string(error.what()).find(filePath.string()), std::string::npos);
+    }
+}
+
 TEST_F(JsonProjectRepositoryTest, SavesAndRestoresAProjectStore) {
     const devmanager::JsonProjectRepository repository(filePath);
     const devmanager::ProjectStore expected{
