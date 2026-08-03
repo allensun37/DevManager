@@ -15,10 +15,10 @@ public:
     void registerRoutes(httplib::Server& server);
 
 private:
+    void handleCreate(const httplib::Request& request, httplib::Response& response);
     void handleList(const httplib::Request& request, httplib::Response& response);
+    void handleUpdate(const httplib::Request& request, httplib::Response& response);
     void handleDelete(const httplib::Request& request, httplib::Response& response);
-    void handleNotImplemented(const httplib::Request& request,
-                              httplib::Response& response);
 
     ProjectManager& manager_;
     std::mutex managerMutex_;

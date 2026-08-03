@@ -1,14 +1,20 @@
 #include "application/ProjectManager.h"
 #include "http/HttpServer.h"
 #include "http/ProjectHttpController.h"
+#include "repository/ProjectRepository.h"
 
 #include <gtest/gtest.h>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cstdint>
+#include <limits>
 #include <string>
+#include <stdexcept>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -53,6 +59,62 @@ httplib::Result get(devmanager::HttpServer& server, const std::string& path) {
     client.set_connection_timeout(0, 100000);
     client.set_path_encode(false);
     return client.Get(path);
+}
+
+httplib::Result postJson(devmanager::HttpServer& server,
+                         const std::string& body) {
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    return client.Post("/api/projects", body, "application/json");
+}
+
+httplib::Result putJson(devmanager::HttpServer& server,
+                        const std::string& path,
+                        const std::string& body) {
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    return client.Put(path, body, "application/json");
+}
+
+class FakeProjectRepository final : public devmanager::ProjectRepository {
+public:
+    explicit FakeProjectRepository(devmanager::ProjectStore initialStore = {})
+        : store_(std::move(initialStore)) {}
+
+    [[nodiscard]] devmanager::ProjectStore loadStore() const override {
+        return store_;
+    }
+
+    void saveStore(const devmanager::ProjectStore& candidate) const override {
+        if (failSaves_) {
+            throw std::runtime_error("injected save failure");
+        }
+        store_ = candidate;
+        savedStores_.push_back(candidate);
+    }
+
+    void setFailSaves(bool fail) const noexcept {
+        failSaves_ = fail;
+    }
+
+    [[nodiscard]] const std::vector<devmanager::ProjectStore>& savedStores() const {
+        return savedStores_;
+    }
+
+private:
+    mutable devmanager::ProjectStore store_;
+    mutable std::vector<devmanager::ProjectStore> savedStores_;
+    mutable bool failSaves_ {false};
+};
+
+std::string validProjectJson(const std::string& name = "DevManager") {
+    return nlohmann::json{
+        {"name", name},
+        {"techStack", {"C++", "CMake"}},
+        {"description", "project"},
+        {"status", "active"},
+    }
+        .dump();
 }
 
 void expectJsonContentType(const httplib::Response& response) {
@@ -242,4 +304,136 @@ TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {
     expectJsonContentType(*response);
     const auto body = nlohmann::json::parse(response->body);
     ASSERT_EQ(body.at("error").at("code"), "invalid_query");
+}
+
+TEST(ProjectHttpControllerTest, CreatesProjectAndReturns201) {
+    devmanager::ProjectManager manager;
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = postJson(server, validProjectJson());
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 201);
+    expectJsonContentType(*response);
+    const auto body = nlohmann::json::parse(response->body);
+    EXPECT_EQ(body.at("id"), 1U);
+    EXPECT_EQ(body.at("name"), "DevManager");
+    EXPECT_EQ(body.at("techStack"), nlohmann::json({"C++", "CMake"}));
+    EXPECT_EQ(body.at("description"), "project");
+    EXPECT_EQ(body.at("status"), "active");
+}
+
+TEST(ProjectHttpControllerTest, RejectsMalformedJsonAndInvalidFields) {
+    devmanager::ProjectManager manager;
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto malformed = postJson(server, "{not-json");
+    ASSERT_TRUE(malformed);
+    ASSERT_EQ(malformed->status, 400);
+    EXPECT_EQ(nlohmann::json::parse(malformed->body).at("error").at("code"),
+              "invalid_json");
+
+    const auto unknown = postJson(
+        server,
+        R"({"name":"DevManager","techStack":["C++"],"description":"project","status":"active","id":9})");
+    ASSERT_TRUE(unknown);
+    ASSERT_EQ(unknown->status, 400);
+    EXPECT_EQ(nlohmann::json::parse(unknown->body).at("error").at("code"),
+              "invalid_request");
+
+    const auto invalidType = postJson(
+        server,
+        R"({"name":"DevManager","techStack":"C++","description":"project","status":"active"})");
+    ASSERT_TRUE(invalidType);
+    ASSERT_EQ(invalidType->status, 400);
+    EXPECT_EQ(nlohmann::json::parse(invalidType->body).at("error").at("code"),
+              "invalid_request");
+}
+
+TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
+    devmanager::ProjectManager manager;
+    ASSERT_EQ(manager.addProject("Before", {"C++"}, "old", "planned"), 1U);
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = putJson(
+        server,
+        "/api/projects/1",
+        R"({"name":"After","techStack":["CMake","Ninja"],"description":"new","status":"active"})");
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 200);
+    expectJsonContentType(*response);
+    const auto body = nlohmann::json::parse(response->body);
+    EXPECT_EQ(body.at("id"), 1U);
+    EXPECT_EQ(body.at("name"), "After");
+    EXPECT_EQ(body.at("techStack"), nlohmann::json({"CMake", "Ninja"}));
+    EXPECT_EQ(body.at("description"), "new");
+    EXPECT_EQ(body.at("status"), "active");
+}
+
+TEST(ProjectHttpControllerTest, DeletesProjectAndReturns204) {
+    devmanager::ProjectManager manager;
+    ASSERT_EQ(manager.addProject("DevManager", {"C++"}, "project", "active"), 1U);
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    const auto response = client.Delete("/api/projects/1");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 204);
+    EXPECT_TRUE(response->body.empty());
+    EXPECT_TRUE(manager.listProjects().empty());
+}
+
+TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack) {
+    FakeProjectRepository repository;
+    repository.setFailSaves(true);
+    devmanager::ProjectManager manager(repository);
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto failed = postJson(server, validProjectJson());
+
+    ASSERT_TRUE(failed);
+    ASSERT_EQ(failed->status, 500);
+    EXPECT_EQ(nlohmann::json::parse(failed->body).at("error").at("code"),
+              "persistence_failure");
+    EXPECT_TRUE(manager.listProjects().empty());
+    EXPECT_TRUE(repository.savedStores().empty());
+
+    repository.setFailSaves(false);
+    const auto retry = postJson(server, validProjectJson("Retry"));
+    ASSERT_TRUE(retry);
+    ASSERT_EQ(retry->status, 201);
+    EXPECT_EQ(nlohmann::json::parse(retry->body).at("id"), 1U);
+}
+
+TEST(ProjectHttpControllerTest, MapsIdExhaustionToConflict) {
+    constexpr devmanager::ProjectId penultimateId =
+        std::numeric_limits<devmanager::ProjectId>::max() - 1U;
+    FakeProjectRepository repository(devmanager::ProjectStore{
+        std::numeric_limits<devmanager::ProjectId>::max(),
+        {devmanager::Project{penultimateId, "Existing", {"C++"}, "", "active"}}});
+    devmanager::ProjectManager manager(repository);
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = postJson(server, validProjectJson());
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 409);
+    EXPECT_EQ(nlohmann::json::parse(response->body).at("error").at("code"),
+              "id_exhausted");
+    ASSERT_EQ(manager.listProjects().size(), 1U);
+    EXPECT_EQ(manager.listProjects().front().id(), penultimateId);
 }

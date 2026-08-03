@@ -5,9 +5,12 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -51,6 +54,13 @@ httplib::Result get(devmanager::HttpServer& server, const std::string& path) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
     return client.Get(path);
+}
+
+httplib::Result postJson(devmanager::HttpServer& server,
+                         const std::string& body) {
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    return client.Post("/api/projects", body, "application/json");
 }
 
 }  // namespace
@@ -107,4 +117,49 @@ TEST(HttpServerIntegrationTest, DeleteInvalidProjectIdReturnsBadRequest) {
     const auto body = nlohmann::json::parse(response->body);
     ASSERT_TRUE(body.contains("error"));
     EXPECT_EQ(body.at("error").at("code"), "invalid_id");
+}
+
+TEST(HttpServerIntegrationTest, ConcurrentCreatesProduceUniqueIds) {
+    devmanager::ProjectManager manager;
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    constexpr std::size_t requestCount = 12U;
+    const std::string body = nlohmann::json{
+        {"name", "DevManager"},
+        {"techStack", {"C++", "CMake"}},
+        {"description", "project"},
+        {"status", "active"},
+    }
+        .dump();
+    std::vector<int> statuses(requestCount, 0);
+    std::vector<devmanager::ProjectId> ids(requestCount, 0U);
+    std::vector<std::thread> workers;
+    workers.reserve(requestCount);
+    for (std::size_t index = 0; index < requestCount; ++index) {
+        workers.emplace_back([&, index]() {
+            const auto response = postJson(server, body);
+            if (response) {
+                statuses[index] = response->status;
+                if (response->status == 201) {
+                    ids[index] = nlohmann::json::parse(response->body)
+                                     .at("id")
+                                     .get<devmanager::ProjectId>();
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join();
+    }
+
+    for (const int status : statuses) {
+        EXPECT_EQ(status, 201);
+    }
+    std::sort(ids.begin(), ids.end());
+    for (std::size_t index = 0; index < ids.size(); ++index) {
+        EXPECT_EQ(ids[index], static_cast<devmanager::ProjectId>(index + 1U));
+    }
+    EXPECT_EQ(manager.listProjects().size(), requestCount);
 }

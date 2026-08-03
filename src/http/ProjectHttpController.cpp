@@ -28,8 +28,17 @@ void sendError(httplib::Response& response, HttpError error) {
     response.set_content(error.toJson().dump(), kJsonContentType);
 }
 
-void sendNotImplemented(httplib::Response& response) {
-    sendError(response, HttpError{501, "not_implemented", "This endpoint is not implemented yet"});
+[[nodiscard]] std::optional<ProjectHttpInput> parseProjectInput(
+    const httplib::Request& request,
+    httplib::Response& response) {
+    try {
+        return ProjectHttpJsonMapper::parseInput(nlohmann::json::parse(request.body));
+    } catch (const nlohmann::json::parse_error& error) {
+        sendError(response, HttpError{400, "invalid_json", error.what()});
+    } catch (const std::invalid_argument& error) {
+        sendError(response, HttpError{400, "invalid_request", error.what()});
+    }
+    return std::nullopt;
 }
 
 void sendException(httplib::Response& response, const std::exception& error) {
@@ -182,18 +191,52 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
 
     server.Post("/api/projects", [this](const httplib::Request& request,
                                         httplib::Response& response) {
-        handleNotImplemented(request, response);
+        handleCreate(request, response);
     });
 
     server.Put(R"(/api/projects/([^/]+))",
                [this](const httplib::Request& request, httplib::Response& response) {
-                   handleNotImplemented(request, response);
+                   handleUpdate(request, response);
                });
 
     server.Delete(R"(/api/projects/([^/]+))",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleDelete(request, response);
                   });
+}
+
+void ProjectHttpController::handleCreate(const httplib::Request& request,
+                                         httplib::Response& response) {
+    const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
+    if (!input.has_value()) {
+        return;
+    }
+
+    try {
+        std::optional<Project> created;
+        {
+            std::lock_guard<std::mutex> lock(managerMutex_);
+            const ProjectId id = manager_.addProject(input->name,
+                                                     input->techStack,
+                                                     input->description,
+                                                     input->status);
+            const auto iterator = std::find_if(
+                manager_.listProjects().begin(), manager_.listProjects().end(),
+                [id](const Project& project) { return project.id() == id; });
+            if (iterator == manager_.listProjects().end()) {
+                throw std::logic_error("Created project is missing from manager state");
+            }
+            created = *iterator;
+        }
+
+        response.status = 201;
+        response.set_content(ProjectHttpJsonMapper::toJson(*created).dump(),
+                             kJsonContentType);
+    } catch (const std::exception& error) {
+        sendException(response, error);
+    } catch (...) {
+        sendError(response, HttpError{500, "internal_error", "Internal server error"});
+    }
 }
 
 void ProjectHttpController::handleList(const httplib::Request& request,
@@ -276,9 +319,55 @@ void ProjectHttpController::handleDelete(const httplib::Request& request,
     }
 }
 
-void ProjectHttpController::handleNotImplemented(const httplib::Request& /*request*/,
-                                                 httplib::Response& response) {
-    sendNotImplemented(response);
+void ProjectHttpController::handleUpdate(const httplib::Request& request,
+                                         httplib::Response& response) {
+    if (request.matches.size() < 2U) {
+        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+        return;
+    }
+
+    const std::optional<ProjectId> id = parseProjectId(request.matches[1].str());
+    if (!id.has_value()) {
+        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+        return;
+    }
+
+    const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
+    if (!input.has_value()) {
+        return;
+    }
+
+    try {
+        std::optional<Project> updated;
+        {
+            std::lock_guard<std::mutex> lock(managerMutex_);
+            if (!manager_.updateProject(*id,
+                                        input->name,
+                                        input->techStack,
+                                        input->description,
+                                        input->status)) {
+                sendError(response,
+                          HttpError{404, "project_not_found", "Project does not exist"});
+                return;
+            }
+
+            const auto iterator = std::find_if(
+                manager_.listProjects().begin(), manager_.listProjects().end(),
+                [id](const Project& project) { return project.id() == *id; });
+            if (iterator == manager_.listProjects().end()) {
+                throw std::logic_error("Updated project is missing from manager state");
+            }
+            updated = *iterator;
+        }
+
+        response.status = 200;
+        response.set_content(ProjectHttpJsonMapper::toJson(*updated).dump(),
+                             kJsonContentType);
+    } catch (const std::exception& error) {
+        sendException(response, error);
+    } catch (...) {
+        sendError(response, HttpError{500, "internal_error", "Internal server error"});
+    }
 }
 
 }  // namespace devmanager
