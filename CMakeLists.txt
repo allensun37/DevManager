@@ -27,12 +27,15 @@ FetchContent_Declare(
 )
 # Keep the dependency HTTP-only; cpp-httplib enables OpenSSL when available by default.
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+# MinGW on this toolchain does not expose GetAddrInfoExCancel; use the portable resolver path.
+set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(cpp_httplib)
 
 add_library(CppHttplib INTERFACE)
 target_include_directories(CppHttplib INTERFACE
     ${cpp_httplib_SOURCE_DIR}
 )
+target_link_libraries(CppHttplib INTERFACE httplib)
 if(WIN32)
     target_link_libraries(CppHttplib INTERFACE ws2_32)
 endif()

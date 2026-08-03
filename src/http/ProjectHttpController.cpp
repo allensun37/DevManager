@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -60,12 +61,12 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
         handleNotImplemented(request, response);
     });
 
-    server.Put(R"(/api/projects/(.+))",
+    server.Put(R"(/api/projects/([^/]+))",
                [this](const httplib::Request& request, httplib::Response& response) {
                    handleNotImplemented(request, response);
                });
 
-    server.Delete(R"(/api/projects/(.+))",
+    server.Delete(R"(/api/projects/([^/]+))",
                   [this](const httplib::Request& request, httplib::Response& response) {
                       handleDelete(request, response);
                   });
