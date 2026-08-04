@@ -91,6 +91,15 @@ target_link_libraries(DevManager PRIVATE
     DevManagerRepository
 )
 
+add_executable(DevManagerHttpServer src/http_main.cpp)
+set_target_properties(DevManagerHttpServer PROPERTIES
+    OUTPUT_NAME devmanager_http
+)
+target_link_libraries(DevManagerHttpServer PRIVATE
+    DevManagerHttp
+    DevManagerRepository
+)
+
 enable_testing()
 include(GoogleTest)
 add_test(NAME DevManagerSmoke COMMAND DevManager)
