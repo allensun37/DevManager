@@ -58,6 +58,12 @@ target_include_directories(DevManagerCommon PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+add_library(DevManagerConfig src/config/Config.cpp)
+target_include_directories(DevManagerConfig PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerConfig PUBLIC nlohmann_json::nlohmann_json)
+
 add_library(DevManagerDomain src/domain/Project.cpp)
 target_include_directories(DevManagerDomain PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -110,6 +116,16 @@ set_tests_properties(DevManagerSmoke PROPERTIES
 add_executable(DevManagerProjectTests tests/domain/ProjectTests.cpp)
 target_link_libraries(DevManagerProjectTests PRIVATE DevManagerDomain GTest::gtest_main)
 gtest_discover_tests(DevManagerProjectTests)
+
+add_executable(DevManagerConfigTests tests/config/ConfigTests.cpp)
+target_include_directories(DevManagerConfigTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerConfigTests PRIVATE
+    DevManagerConfig
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerConfigTests)
 
 add_executable(DevManagerAsciiTextTests tests/common/AsciiTextTests.cpp)
 target_include_directories(DevManagerAsciiTextTests PRIVATE
