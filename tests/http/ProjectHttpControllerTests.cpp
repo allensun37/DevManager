@@ -377,6 +377,24 @@ TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
     EXPECT_EQ(body.at("status"), "active");
 }
 
+TEST(ProjectHttpControllerTest, UpdatesMissingProjectAndReturns404) {
+    devmanager::ProjectManager manager;
+    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = putJson(
+        server,
+        "/api/projects/99",
+        R"({"name":"After","techStack":["CMake"],"description":"new","status":"active"})");
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 404);
+    expectJsonContentType(*response);
+    EXPECT_EQ(nlohmann::json::parse(response->body).at("error").at("code"),
+              "project_not_found");
+}
+
 TEST(ProjectHttpControllerTest, DeletesProjectAndReturns204) {
     devmanager::ProjectManager manager;
     ASSERT_EQ(manager.addProject("DevManager", {"C++"}, "project", "active"), 1U);
@@ -405,8 +423,9 @@ TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack)
 
     ASSERT_TRUE(failed);
     ASSERT_EQ(failed->status, 500);
-    EXPECT_EQ(nlohmann::json::parse(failed->body).at("error").at("code"),
-              "persistence_failure");
+    const auto failureBody = nlohmann::json::parse(failed->body);
+    EXPECT_EQ(failureBody.at("error").at("code"), "persistence_failure");
+    EXPECT_EQ(failureBody.at("error").at("message"), "Persistence operation failed");
     EXPECT_TRUE(manager.listProjects().empty());
     EXPECT_TRUE(repository.savedStores().empty());
 

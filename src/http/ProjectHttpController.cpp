@@ -53,7 +53,8 @@ void sendException(httplib::Response& response, const std::exception& error) {
     }
 
     if (dynamic_cast<const std::runtime_error*>(&error) != nullptr) {
-        sendError(response, HttpError{500, "persistence_failure", error.what()});
+        sendError(response,
+                  HttpError{500, "persistence_failure", "Persistence operation failed"});
         return;
     }
 
@@ -207,12 +208,12 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
 
 void ProjectHttpController::handleCreate(const httplib::Request& request,
                                          httplib::Response& response) {
-    const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
-    if (!input.has_value()) {
-        return;
-    }
-
     try {
+        const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
+        if (!input.has_value()) {
+            return;
+        }
+
         std::optional<Project> created;
         {
             std::lock_guard<std::mutex> lock(managerMutex_);
@@ -287,18 +288,18 @@ void ProjectHttpController::handleList(const httplib::Request& request,
 
 void ProjectHttpController::handleDelete(const httplib::Request& request,
                                          httplib::Response& response) {
-    if (request.matches.size() < 2U) {
-        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
-        return;
-    }
-
-    const std::optional<ProjectId> id = parseProjectId(request.matches[1].str());
-    if (!id.has_value()) {
-        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
-        return;
-    }
-
     try {
+        if (request.matches.size() < 2U) {
+            sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+            return;
+        }
+
+        const std::optional<ProjectId> id = parseProjectId(request.matches[1].str());
+        if (!id.has_value()) {
+            sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+            return;
+        }
+
         bool deleted = false;
         {
             std::lock_guard<std::mutex> lock(managerMutex_);
@@ -321,43 +322,47 @@ void ProjectHttpController::handleDelete(const httplib::Request& request,
 
 void ProjectHttpController::handleUpdate(const httplib::Request& request,
                                          httplib::Response& response) {
-    if (request.matches.size() < 2U) {
-        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
-        return;
-    }
-
-    const std::optional<ProjectId> id = parseProjectId(request.matches[1].str());
-    if (!id.has_value()) {
-        sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
-        return;
-    }
-
-    const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
-    if (!input.has_value()) {
-        return;
-    }
-
     try {
+        if (request.matches.size() < 2U) {
+            sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+            return;
+        }
+
+        const std::optional<ProjectId> id = parseProjectId(request.matches[1].str());
+        if (!id.has_value()) {
+            sendError(response, HttpError{400, "invalid_id", "Project ID is invalid"});
+            return;
+        }
+
+        const std::optional<ProjectHttpInput> input = parseProjectInput(request, response);
+        if (!input.has_value()) {
+            return;
+        }
+
         std::optional<Project> updated;
+        bool found = false;
         {
             std::lock_guard<std::mutex> lock(managerMutex_);
-            if (!manager_.updateProject(*id,
-                                        input->name,
-                                        input->techStack,
-                                        input->description,
-                                        input->status)) {
-                sendError(response,
-                          HttpError{404, "project_not_found", "Project does not exist"});
-                return;
+            found = manager_.updateProject(*id,
+                                           input->name,
+                                           input->techStack,
+                                           input->description,
+                                           input->status);
+            if (found) {
+                const auto iterator = std::find_if(
+                    manager_.listProjects().begin(), manager_.listProjects().end(),
+                    [id](const Project& project) { return project.id() == *id; });
+                if (iterator == manager_.listProjects().end()) {
+                    throw std::logic_error("Updated project is missing from manager state");
+                }
+                updated = *iterator;
             }
+        }
 
-            const auto iterator = std::find_if(
-                manager_.listProjects().begin(), manager_.listProjects().end(),
-                [id](const Project& project) { return project.id() == *id; });
-            if (iterator == manager_.listProjects().end()) {
-                throw std::logic_error("Updated project is missing from manager state");
-            }
-            updated = *iterator;
+        if (!found) {
+            sendError(response,
+                      HttpError{404, "project_not_found", "Project does not exist"});
+            return;
         }
 
         response.status = 200;
