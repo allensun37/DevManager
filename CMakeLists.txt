@@ -20,6 +20,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+FetchContent_Declare(
+    cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG 095a5c1caf9e467ff840ee2ffd19be1a7852203b
+)
+# Keep the dependency HTTP-only; cpp-httplib enables OpenSSL when available by default.
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+# MinGW on this toolchain does not expose GetAddrInfoExCancel; use the portable resolver path.
+set(HTTPLIB_USE_NON_BLOCKING_GETADDRINFO OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(cpp_httplib)
+
+add_library(CppHttplib INTERFACE)
+target_include_directories(CppHttplib INTERFACE
+    ${cpp_httplib_SOURCE_DIR}
+)
+target_link_libraries(CppHttplib INTERFACE httplib)
+if(WIN32)
+    target_link_libraries(CppHttplib INTERFACE ws2_32)
+endif()
+
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -30,7 +50,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-add_library(DevManagerCommon src/common/AsciiText.cpp)
+add_library(DevManagerCommon
+    src/common/AsciiText.cpp
+    src/common/ProjectIdParser.cpp
+)
 target_include_directories(DevManagerCommon PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
@@ -68,6 +91,15 @@ target_link_libraries(DevManager PRIVATE
     DevManagerRepository
 )
 
+add_executable(DevManagerHttpServer src/http_main.cpp)
+set_target_properties(DevManagerHttpServer PROPERTIES
+    OUTPUT_NAME devmanager_http
+)
+target_link_libraries(DevManagerHttpServer PRIVATE
+    DevManagerHttp
+    DevManagerRepository
+)
+
 enable_testing()
 include(GoogleTest)
 add_test(NAME DevManagerSmoke COMMAND DevManager)
@@ -85,6 +117,13 @@ target_include_directories(DevManagerAsciiTextTests PRIVATE
 )
 target_link_libraries(DevManagerAsciiTextTests PRIVATE DevManagerCommon GTest::gtest_main)
 gtest_discover_tests(DevManagerAsciiTextTests)
+
+add_executable(DevManagerProjectIdParserTests tests/common/ProjectIdParserTests.cpp)
+target_include_directories(DevManagerProjectIdParserTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectIdParserTests PRIVATE DevManagerCommon GTest::gtest_main)
+gtest_discover_tests(DevManagerProjectIdParserTests)
 
 add_executable(DevManagerProjectManagerTests
     tests/application/ProjectManagerTests.cpp
@@ -110,3 +149,56 @@ add_executable(DevManagerMenuTests
 )
 target_link_libraries(DevManagerMenuTests PRIVATE DevManagerMenu GTest::gtest_main)
 gtest_discover_tests(DevManagerMenuTests)
+
+add_library(DevManagerHttp
+    src/http/HttpError.cpp
+    src/http/ProjectHttpJsonMapper.cpp
+    src/http/HttpServer.cpp
+    src/http/ProjectHttpController.cpp
+)
+target_include_directories(DevManagerHttp PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerHttp PUBLIC
+    DevManagerApplication
+    DevManagerRepository
+    DevManagerCommon
+    CppHttplib
+)
+
+add_executable(DevManagerProjectHttpJsonMapperTests
+    tests/http/ProjectHttpJsonMapperTests.cpp
+)
+target_include_directories(DevManagerProjectHttpJsonMapperTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectHttpJsonMapperTests PRIVATE
+    DevManagerHttp
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectHttpJsonMapperTests)
+
+add_executable(DevManagerProjectHttpControllerTests
+    tests/http/ProjectHttpControllerTests.cpp
+)
+target_include_directories(DevManagerProjectHttpControllerTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectHttpControllerTests PRIVATE
+    DevManagerHttp
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectHttpControllerTests)
+
+add_executable(DevManagerHttpServerIntegrationTests
+    tests/http/HttpServerIntegrationTests.cpp
+)
+target_include_directories(DevManagerHttpServerIntegrationTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerHttpServerIntegrationTests PRIVATE
+    DevManagerHttp
+    CppHttplib
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerHttpServerIntegrationTests)
