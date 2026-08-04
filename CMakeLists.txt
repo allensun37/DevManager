@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DevManager VERSION 0.2.0 LANGUAGES CXX)
+project(DevManager VERSION 0.4.0 LANGUAGES CXX)
+
+set(DEVMANAGER_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${DEVMANAGER_GENERATED_INCLUDE_DIR}")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DevManagerVersion.h.in"
+    "${DEVMANAGER_GENERATED_INCLUDE_DIR}/DevManagerVersion.h"
+    @ONLY
+)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -140,6 +148,13 @@ target_include_directories(DevManagerProjectIdParserTests PRIVATE
 )
 target_link_libraries(DevManagerProjectIdParserTests PRIVATE DevManagerCommon GTest::gtest_main)
 gtest_discover_tests(DevManagerProjectIdParserTests)
+
+add_executable(DevManagerVersionTests tests/common/DevManagerVersionTests.cpp)
+target_include_directories(DevManagerVersionTests PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+target_link_libraries(DevManagerVersionTests PRIVATE GTest::gtest_main)
+gtest_discover_tests(DevManagerVersionTests)
 
 add_executable(DevManagerProjectManagerTests
     tests/application/ProjectManagerTests.cpp

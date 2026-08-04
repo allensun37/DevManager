@@ -1,0 +1,7 @@
+#pragma once
+
+namespace devmanager {
+
+inline constexpr char kDevManagerVersion[] = "@PROJECT_VERSION@";
+
+}  // namespace devmanager
