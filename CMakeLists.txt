@@ -78,11 +78,19 @@ target_include_directories(DevManagerDomain PUBLIC
 )
 target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
 
-add_library(DevManagerApplication src/application/ProjectManager.cpp)
+add_library(DevManagerApplication
+    src/application/ProjectManager.cpp
+    src/application/ApplicationBootstrap.cpp
+)
 target_include_directories(DevManagerApplication PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(DevManagerApplication PUBLIC DevManagerCommon DevManagerDomain)
+target_link_libraries(DevManagerApplication PUBLIC
+    DevManagerCommon
+    DevManagerDomain
+    DevManagerConfig
+    DevManagerRepository
+)
 
 add_library(DevManagerRepository
     src/repository/FileReplacer.cpp
@@ -165,6 +173,16 @@ target_link_libraries(DevManagerProjectManagerTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerProjectManagerTests)
+
+add_executable(DevManagerApplicationBootstrapTests
+    tests/application/ApplicationBootstrapTests.cpp
+)
+target_link_libraries(DevManagerApplicationBootstrapTests PRIVATE
+    DevManagerApplication
+    DevManagerRepository
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerApplicationBootstrapTests)
 
 add_executable(DevManagerJsonProjectRepositoryTests
     tests/repository/JsonProjectRepositoryTests.cpp
