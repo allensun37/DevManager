@@ -8,9 +8,20 @@ namespace devmanager {
 
 HttpServer::HttpServer(ProjectService& service, std::string host, std::uint16_t port)
     : service_(service),
+      logger_(nullptr),
       host_(std::move(host)),
       requestedPort_(port),
-      controller_(service_) {}
+      controller_(service_, logger_) {}
+
+HttpServer::HttpServer(ProjectService& service,
+                       Logger& logger,
+                       std::string host,
+                       std::uint16_t port)
+    : service_(service),
+      logger_(&logger),
+      host_(std::move(host)),
+      requestedPort_(port),
+      controller_(service_, logger_) {}
 
 void HttpServer::bind() {
     if (bound_) {
@@ -18,6 +29,14 @@ void HttpServer::bind() {
     }
 
     controller_.registerRoutes(server_);
+    if (logger_ != nullptr) {
+        server_.set_error_handler([this](const httplib::Request& request,
+                                         httplib::Response& response) {
+            logger_->error("HTTP error method=" + request.method +
+                           " path=" + request.path +
+                           " status=" + std::to_string(response.status));
+        });
+    }
 
     const int actualPort = requestedPort_ == 0
                                ? server_.bind_to_any_port(host_)
@@ -31,6 +50,10 @@ void HttpServer::bind() {
 
     boundPort_ = static_cast<std::uint16_t>(actualPort);
     bound_ = true;
+    if (logger_ != nullptr) {
+        logger_->info("HTTP server started host=" + host_ +
+                      " port=" + std::to_string(boundPort_));
+    }
 }
 
 void HttpServer::run() {

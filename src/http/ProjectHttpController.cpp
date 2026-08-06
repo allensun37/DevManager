@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <exception>
 #include <map>
 #include <optional>
@@ -161,28 +162,60 @@ void sendException(httplib::Response& response, const std::exception& error) {
 
 }  // namespace
 
-ProjectHttpController::ProjectHttpController(ProjectService& service) : service_(service) {}
+ProjectHttpController::ProjectHttpController(ProjectService& service, Logger* logger)
+    : service_(service), logger_(logger) {}
 
 void ProjectHttpController::registerRoutes(httplib::Server& server) {
     server.Get("/api/projects", [this](const httplib::Request& request,
                                        httplib::Response& response) {
+        const auto started = std::chrono::steady_clock::now();
         handleList(request, response);
+        logRequest(request, response, started);
     });
 
     server.Post("/api/projects", [this](const httplib::Request& request,
-                                        httplib::Response& response) {
+                                       httplib::Response& response) {
+        const auto started = std::chrono::steady_clock::now();
         handleCreate(request, response);
+        logRequest(request, response, started);
     });
 
     server.Put(R"(/api/projects/([^/]+))",
                [this](const httplib::Request& request, httplib::Response& response) {
+                   const auto started = std::chrono::steady_clock::now();
                    handleUpdate(request, response);
+                   logRequest(request, response, started);
                });
 
     server.Delete(R"(/api/projects/([^/]+))",
                   [this](const httplib::Request& request, httplib::Response& response) {
+                      const auto started = std::chrono::steady_clock::now();
                       handleDelete(request, response);
+                      logRequest(request, response, started);
                   });
+}
+
+void ProjectHttpController::logRequest(
+    const httplib::Request& request,
+    const httplib::Response& response,
+    std::chrono::steady_clock::time_point started) const {
+    if (logger_ == nullptr) {
+        return;
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
+    const bool isError = response.status >= 400;
+    const std::string prefix = isError ? "HTTP error" : "HTTP request";
+    const std::string message = prefix + " method=" + request.method +
+                                " path=" + request.path +
+                                " status=" + std::to_string(response.status) +
+                                " duration_ms=" + std::to_string(elapsed.count());
+    if (isError) {
+        logger_->error(message);
+    } else {
+        logger_->info(message);
+    }
 }
 
 void ProjectHttpController::handleCreate(const httplib::Request& request,

@@ -58,6 +58,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    # Pin the adapter dependency to a released version; never follow master.
+    GIT_TAG v1.15.1
+)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(spdlog)
+
 add_library(DevManagerCommon
     src/common/AsciiText.cpp
     src/common/ProjectIdParser.cpp
@@ -71,6 +82,12 @@ target_include_directories(DevManagerConfig PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(DevManagerConfig PUBLIC nlohmann_json::nlohmann_json)
+
+add_library(DevManagerLogger src/infrastructure/logging/Logger.cpp)
+target_include_directories(DevManagerLogger PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerLogger PUBLIC spdlog::spdlog)
 
 add_library(DevManagerDomain src/domain/Project.cpp)
 target_include_directories(DevManagerDomain PUBLIC
@@ -90,6 +107,7 @@ target_link_libraries(DevManagerApplication PUBLIC
     DevManagerCommon
     DevManagerDomain
     DevManagerConfig
+    DevManagerLogger
     DevManagerRepository
 )
 
@@ -193,6 +211,18 @@ target_link_libraries(DevManagerApplicationBootstrapTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerApplicationBootstrapTests)
+
+add_executable(DevManagerLoggerTests
+    tests/infrastructure/LoggerTests.cpp
+)
+target_include_directories(DevManagerLoggerTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerLoggerTests PRIVATE
+    DevManagerLogger
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerLoggerTests)
 
 add_executable(DevManagerJsonProjectRepositoryTests
     tests/repository/JsonProjectRepositoryTests.cpp

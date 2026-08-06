@@ -8,6 +8,7 @@ int main() {
     try {
         devmanager::ApplicationBootstrap bootstrap(devmanager::Config{});
         devmanager::HttpServer server(bootstrap.service(),
+                                      bootstrap.logger(),
                                       bootstrap.config().server.host,
                                       bootstrap.config().server.port);
         server.bind();

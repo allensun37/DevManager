@@ -1,19 +1,42 @@
 #include "application/ProjectManager.h"
 #include "application/ProjectService.h"
 #include "http/HttpServer.h"
+#include "infrastructure/logging/Logger.h"
 
 #include <gtest/gtest.h>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
 namespace {
+
+std::filesystem::path makeLoggerTestDirectory() {
+    static std::atomic_uint64_t counter{0};
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("devmanager-http-logger-tests-" + std::to_string(timestamp) +
+                            "-" + std::to_string(counter++));
+    std::filesystem::create_directories(directory);
+    return directory;
+}
+
+std::string readLoggerFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
+}
 
 class RunningServer final {
 public:
@@ -168,4 +191,31 @@ TEST(HttpServerIntegrationTest, ConcurrentCreatesProduceUniqueIds) {
         EXPECT_EQ(ids[index], static_cast<devmanager::ProjectId>(index + 1U));
     }
     EXPECT_EQ(manager.listProjects().size(), requestCount);
+}
+
+TEST(HttpServerIntegrationTest, LogsStartupAndHttpErrorsThroughInjectedLogger) {
+    const std::filesystem::path directory = makeLoggerTestDirectory();
+    const std::filesystem::path logPath = directory / "devmanager.log";
+    {
+        devmanager::Logger logger(logPath, "info");
+        devmanager::ProjectManager manager;
+        devmanager::ProjectService service(manager);
+        devmanager::HttpServer server(service, logger, "127.0.0.1", 0);
+        RunningServer running(server);
+        ASSERT_TRUE(running.waitUntilReady());
+
+        httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+        const auto response = client.Get("/unknown");
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 404);
+    }
+
+    const std::string contents = readLoggerFile(logPath);
+    EXPECT_NE(contents.find("HTTP server started"), std::string::npos);
+    EXPECT_NE(contents.find("HTTP error"), std::string::npos);
+    EXPECT_NE(contents.find("status=404"), std::string::npos);
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    ASSERT_FALSE(error) << "Failed to remove logger test directory: " << error.message();
 }
