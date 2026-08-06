@@ -33,6 +33,9 @@ jobs:
       - name: Validate OpenAPI contract markers
         run: python scripts/validate_openapi_contract.py
 
+      - name: Validate v0.4 release contract
+        run: python scripts/validate_release_contract.py
+
       - name: Validate OpenAPI schema
         run: python -m openapi_spec_validator docs/openapi.yaml
 
