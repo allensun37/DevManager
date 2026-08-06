@@ -79,4 +79,15 @@ TEST_F(ApplicationBootstrapTest, MissingStorageStartsWithTheDefaultNextId) {
     EXPECT_EQ(bootstrap.manager().addProject("New", {"C++"}, "", "active"), 1);
 }
 
+TEST_F(ApplicationBootstrapTest, OwnsAServiceOverTheSameManager) {
+    devmanager::ApplicationBootstrap bootstrap(config());
+
+    const devmanager::Project project =
+        bootstrap.service().addProject("Service project", {"C++"}, "", "active");
+
+    EXPECT_EQ(project.id(), 1U);
+    ASSERT_EQ(bootstrap.manager().listProjects().size(), 1U);
+    EXPECT_EQ(bootstrap.service().listProjects().front().id(), project.id());
+}
+
 }  // namespace

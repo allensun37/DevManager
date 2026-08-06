@@ -1,6 +1,5 @@
 #include "http/ProjectHttpController.h"
 
-#include "common/AsciiText.h"
 #include "common/ProjectIdParser.h"
 #include "http/HttpError.h"
 #include "http/ProjectHttpJsonMapper.h"
@@ -160,29 +159,9 @@ void sendException(httplib::Response& response, const std::exception& error) {
     return true;
 }
 
-void sortProjects(std::vector<Project>& projects, ProjectSortKey key) {
-    std::sort(projects.begin(), projects.end(), [key](const Project& left,
-                                                       const Project& right) {
-        if (key == ProjectSortKey::Id) {
-            return left.id() < right.id();
-        }
-
-        const std::string leftValue = key == ProjectSortKey::Name
-                                          ? ascii::toLower(left.name())
-                                          : ascii::toLower(left.status());
-        const std::string rightValue = key == ProjectSortKey::Name
-                                           ? ascii::toLower(right.name())
-                                           : ascii::toLower(right.status());
-        if (leftValue == rightValue) {
-            return left.id() < right.id();
-        }
-        return leftValue < rightValue;
-    });
-}
-
 }  // namespace
 
-ProjectHttpController::ProjectHttpController(ProjectManager& manager) : manager_(manager) {}
+ProjectHttpController::ProjectHttpController(ProjectService& service) : service_(service) {}
 
 void ProjectHttpController::registerRoutes(httplib::Server& server) {
     server.Get("/api/projects", [this](const httplib::Request& request,
@@ -214,24 +193,13 @@ void ProjectHttpController::handleCreate(const httplib::Request& request,
             return;
         }
 
-        std::optional<Project> created;
-        {
-            std::lock_guard<std::mutex> lock(managerMutex_);
-            const ProjectId id = manager_.addProject(input->name,
-                                                     input->techStack,
-                                                     input->description,
-                                                     input->status);
-            const auto iterator = std::find_if(
-                manager_.listProjects().begin(), manager_.listProjects().end(),
-                [id](const Project& project) { return project.id() == id; });
-            if (iterator == manager_.listProjects().end()) {
-                throw std::logic_error("Created project is missing from manager state");
-            }
-            created = *iterator;
-        }
+        const Project created = service_.addProject(input->name,
+                                                    input->techStack,
+                                                    input->description,
+                                                    input->status);
 
         response.status = 201;
-        response.set_content(ProjectHttpJsonMapper::toJson(*created).dump(),
+        response.set_content(ProjectHttpJsonMapper::toJson(created).dump(),
                              kJsonContentType);
     } catch (const std::exception& error) {
         sendException(response, error);
@@ -252,24 +220,20 @@ void ProjectHttpController::handleList(const httplib::Request& request,
         }
 
         std::vector<Project> projects;
-        {
-            std::lock_guard<std::mutex> lock(managerMutex_);
-            if (filterKey == "name") {
-                projects = manager_.searchByName(request.get_param_value("name"));
-            } else if (filterKey == "technology") {
-                projects = manager_.searchByTechnology(
-                    request.get_param_value("technology"));
-            } else if (filterKey == "status") {
-                projects = manager_.filterByStatus(request.get_param_value("status"));
-            } else if (sortKey.has_value()) {
-                projects = manager_.sortedProjects(*sortKey);
-            } else {
-                projects = manager_.listProjects();
-            }
+        if (filterKey == "name") {
+            projects = service_.searchByName(request.get_param_value("name"));
+        } else if (filterKey == "technology") {
+            projects = service_.searchByTechnology(request.get_param_value("technology"));
+        } else if (filterKey == "status") {
+            projects = service_.filterByStatus(request.get_param_value("status"));
+        } else if (sortKey.has_value()) {
+            projects = service_.sortedProjects(*sortKey);
+        } else {
+            projects = service_.listProjects();
         }
 
         if (sortKey.has_value() && !filterKey.empty()) {
-            sortProjects(projects, *sortKey);
+            projects = service_.sortProjects(std::move(projects), *sortKey);
         }
 
         nlohmann::json payload = nlohmann::json::array();
@@ -300,11 +264,7 @@ void ProjectHttpController::handleDelete(const httplib::Request& request,
             return;
         }
 
-        bool deleted = false;
-        {
-            std::lock_guard<std::mutex> lock(managerMutex_);
-            deleted = manager_.deleteProject(*id);
-        }
+        const bool deleted = service_.deleteProject(*id);
 
         if (!deleted) {
             sendError(response,
@@ -339,27 +299,13 @@ void ProjectHttpController::handleUpdate(const httplib::Request& request,
             return;
         }
 
-        std::optional<Project> updated;
-        bool found = false;
-        {
-            std::lock_guard<std::mutex> lock(managerMutex_);
-            found = manager_.updateProject(*id,
-                                           input->name,
-                                           input->techStack,
-                                           input->description,
-                                           input->status);
-            if (found) {
-                const auto iterator = std::find_if(
-                    manager_.listProjects().begin(), manager_.listProjects().end(),
-                    [id](const Project& project) { return project.id() == *id; });
-                if (iterator == manager_.listProjects().end()) {
-                    throw std::logic_error("Updated project is missing from manager state");
-                }
-                updated = *iterator;
-            }
-        }
+        const std::optional<Project> updated = service_.updateProject(*id,
+                                                                      input->name,
+                                                                      input->techStack,
+                                                                      input->description,
+                                                                      input->status);
 
-        if (!found) {
+        if (!updated.has_value()) {
             sendError(response,
                       HttpError{404, "project_not_found", "Project does not exist"});
             return;

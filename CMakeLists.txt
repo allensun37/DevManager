@@ -81,6 +81,7 @@ target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
 add_library(DevManagerApplication
     src/application/ProjectManager.cpp
     src/application/ApplicationBootstrap.cpp
+    src/application/ProjectService.cpp
 )
 target_include_directories(DevManagerApplication PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -173,6 +174,15 @@ target_link_libraries(DevManagerProjectManagerTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerProjectManagerTests)
+
+add_executable(DevManagerProjectServiceTests
+    tests/application/ProjectServiceTests.cpp
+)
+target_link_libraries(DevManagerProjectServiceTests PRIVATE
+    DevManagerApplication
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectServiceTests)
 
 add_executable(DevManagerApplicationBootstrapTests
     tests/application/ApplicationBootstrapTests.cpp

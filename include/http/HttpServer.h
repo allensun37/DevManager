@@ -11,7 +11,7 @@ namespace devmanager {
 
 class HttpServer final {
 public:
-    HttpServer(ProjectManager& manager, std::string host, std::uint16_t port);
+    HttpServer(ProjectService& service, std::string host, std::uint16_t port);
 
     void bind();
     void run();
@@ -19,7 +19,7 @@ public:
     [[nodiscard]] std::uint16_t boundPort() const noexcept;
 
 private:
-    ProjectManager& manager_;
+    ProjectService& service_;
     std::string host_;
     std::uint16_t requestedPort_;
     std::uint16_t boundPort_ {0};

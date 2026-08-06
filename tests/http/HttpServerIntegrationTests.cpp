@@ -1,4 +1,5 @@
 #include "application/ProjectManager.h"
+#include "application/ProjectService.h"
 #include "http/HttpServer.h"
 
 #include <gtest/gtest.h>
@@ -67,7 +68,8 @@ httplib::Result postJson(devmanager::HttpServer& server,
 
 TEST(HttpServerIntegrationTest, BindsDynamicPortAndStopsCleanly) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
 
     EXPECT_GT(server.boundPort(), 0U);
@@ -76,7 +78,8 @@ TEST(HttpServerIntegrationTest, BindsDynamicPortAndStopsCleanly) {
 
 TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -89,7 +92,8 @@ TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
 
 TEST(HttpServerIntegrationTest, DeleteMissingProjectReturnsNotFoundError) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -105,7 +109,8 @@ TEST(HttpServerIntegrationTest, DeleteMissingProjectReturnsNotFoundError) {
 
 TEST(HttpServerIntegrationTest, DeleteInvalidProjectIdReturnsBadRequest) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -121,7 +126,8 @@ TEST(HttpServerIntegrationTest, DeleteInvalidProjectIdReturnsBadRequest) {
 
 TEST(HttpServerIntegrationTest, ConcurrentCreatesProduceUniqueIds) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 

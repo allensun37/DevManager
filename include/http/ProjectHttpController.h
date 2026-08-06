@@ -1,16 +1,14 @@
 #pragma once
 
-#include "application/ProjectManager.h"
+#include "application/ProjectService.h"
 
 #include <httplib.h>
-
-#include <mutex>
 
 namespace devmanager {
 
 class ProjectHttpController final {
 public:
-    explicit ProjectHttpController(ProjectManager& manager);
+    explicit ProjectHttpController(ProjectService& service);
 
     void registerRoutes(httplib::Server& server);
 
@@ -20,8 +18,7 @@ private:
     void handleUpdate(const httplib::Request& request, httplib::Response& response);
     void handleDelete(const httplib::Request& request, httplib::Response& response);
 
-    ProjectManager& manager_;
-    std::mutex managerMutex_;
+    ProjectService& service_;
 };
 
 }  // namespace devmanager

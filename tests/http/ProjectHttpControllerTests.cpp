@@ -1,4 +1,5 @@
 #include "application/ProjectManager.h"
+#include "application/ProjectService.h"
 #include "http/HttpServer.h"
 #include "http/ProjectHttpController.h"
 #include "repository/ProjectRepository.h"
@@ -126,17 +127,28 @@ void expectJsonContentType(const httplib::Response& response) {
 
 TEST(ProjectHttpControllerTest, RegistersProjectRoutesWithoutThrowing) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     httplib::Server server;
-    devmanager::ProjectHttpController controller(manager);
+    devmanager::ProjectHttpController controller(service);
+
+    EXPECT_NO_THROW(controller.registerRoutes(server));
+}
+
+TEST(ProjectHttpControllerTest, AcceptsProjectServiceDependency) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    httplib::Server server;
+    devmanager::ProjectHttpController controller(service);
 
     EXPECT_NO_THROW(controller.registerRoutes(server));
 }
 
 TEST(ProjectHttpControllerTest, ListsAllProjectsWhenNoQueryIsPresent) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "last", "active"), 1U);
     ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "first", "planned"), 2U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -154,9 +166,10 @@ TEST(ProjectHttpControllerTest, ListsAllProjectsWhenNoQueryIsPresent) {
 
 TEST(ProjectHttpControllerTest, AllowsSortWithoutAFilter) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "", "planned"), 2U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -174,9 +187,10 @@ TEST(ProjectHttpControllerTest, AllowsSortWithoutAFilter) {
 
 TEST(ProjectHttpControllerTest, SearchesByNameOrTechnology) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("DevManager", {"C++", "CMake"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Website", {"React"}, "", "planned"), 2U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -201,9 +215,10 @@ TEST(ProjectHttpControllerTest, SearchesByNameOrTechnology) {
 
 TEST(ProjectHttpControllerTest, FiltersByStatus) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("One", {"C++"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Two", {"CMake"}, "", "planned"), 2U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -220,7 +235,8 @@ TEST(ProjectHttpControllerTest, FiltersByStatus) {
 
 TEST(ProjectHttpControllerTest, RejectsMultipleFilterParameters) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -235,7 +251,8 @@ TEST(ProjectHttpControllerTest, RejectsMultipleFilterParameters) {
 
 TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -293,7 +310,8 @@ TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
 
 TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -308,7 +326,8 @@ TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {
 
 TEST(ProjectHttpControllerTest, CreatesProjectAndReturns201) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -327,7 +346,8 @@ TEST(ProjectHttpControllerTest, CreatesProjectAndReturns201) {
 
 TEST(ProjectHttpControllerTest, RejectsMalformedJsonAndInvalidFields) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -356,8 +376,9 @@ TEST(ProjectHttpControllerTest, RejectsMalformedJsonAndInvalidFields) {
 
 TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Before", {"C++"}, "old", "planned"), 1U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -379,7 +400,8 @@ TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
 
 TEST(ProjectHttpControllerTest, UpdatesMissingProjectAndReturns404) {
     devmanager::ProjectManager manager;
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -397,8 +419,9 @@ TEST(ProjectHttpControllerTest, UpdatesMissingProjectAndReturns404) {
 
 TEST(ProjectHttpControllerTest, DeletesProjectAndReturns204) {
     devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("DevManager", {"C++"}, "project", "active"), 1U);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -415,7 +438,8 @@ TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack)
     FakeProjectRepository repository;
     repository.setFailSaves(true);
     devmanager::ProjectManager manager(repository);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -443,7 +467,8 @@ TEST(ProjectHttpControllerTest, MapsIdExhaustionToConflict) {
         std::numeric_limits<devmanager::ProjectId>::max(),
         {devmanager::Project{penultimateId, "Existing", {"C++"}, "", "active"}}});
     devmanager::ProjectManager manager(repository);
-    devmanager::HttpServer server(manager, "127.0.0.1", 0);
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 

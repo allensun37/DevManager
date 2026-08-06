@@ -6,11 +6,11 @@
 
 namespace devmanager {
 
-HttpServer::HttpServer(ProjectManager& manager, std::string host, std::uint16_t port)
-    : manager_(manager),
+HttpServer::HttpServer(ProjectService& service, std::string host, std::uint16_t port)
+    : service_(service),
       host_(std::move(host)),
       requestedPort_(port),
-      controller_(manager_) {}
+      controller_(service_) {}
 
 void HttpServer::bind() {
     if (bound_) {

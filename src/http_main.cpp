@@ -1,15 +1,15 @@
-#include "application/ProjectManager.h"
+#include "application/ApplicationBootstrap.h"
 #include "http/HttpServer.h"
-#include "repository/JsonProjectRepository.h"
 
 #include <exception>
 #include <iostream>
 
 int main() {
     try {
-        devmanager::JsonProjectRepository repository("data/projects.json");
-        devmanager::ProjectManager manager(repository);
-        devmanager::HttpServer server(manager, "127.0.0.1", 8080);
+        devmanager::ApplicationBootstrap bootstrap(devmanager::Config{});
+        devmanager::HttpServer server(bootstrap.service(),
+                                      bootstrap.config().server.host,
+                                      bootstrap.config().server.port);
         server.bind();
         server.run();
         return 0;
