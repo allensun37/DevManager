@@ -1,0 +1,427 @@
+openapi: 3.0.3
+info:
+  title: DevManager HTTP API
+  version: 0.4.0
+  description: Local project-management API exposed by DevManager.
+servers:
+  - url: http://127.0.0.1:8080
+
+# Contract: GET /api/projects
+# Contract: POST /api/projects
+# Contract: PUT /api/projects/{id}
+# Contract: DELETE /api/projects/{id}
+# Contract: GET /health
+# Contract: GET /api/info
+# Contract: GET /api/statistics
+paths:
+  /api/projects:
+    get:
+      operationId: listProjects
+      summary: List, search, filter, or sort projects
+      description: >-
+        Returns all projects when no query is supplied. At most one of name,
+        technology, and status may be supplied; sort may be combined with one
+        filter and orders the resulting list in ascending order.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - name: name
+          in: query
+          description: Case-insensitive project-name search.
+          schema:
+            type: string
+            minLength: 1
+        - name: technology
+          in: query
+          description: Case-insensitive technology search.
+          schema:
+            type: string
+            minLength: 1
+        - name: status
+          in: query
+          description: Case-insensitive status filter.
+          schema:
+            type: string
+            minLength: 1
+        - name: sort
+          in: query
+          description: Ascending sort key; may be combined with one filter.
+          schema:
+            type: string
+            enum: [id, name, status]
+      responses:
+        '200':
+          description: Project list.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/InvalidQuery'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      operationId: createProject
+      summary: Create a project
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectInput'
+      responses:
+        '201':
+          description: Project created.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '409':
+          $ref: '#/components/responses/IdExhausted'
+        '500':
+          $ref: '#/components/responses/PersistenceFailure'
+
+  /api/projects/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectId'
+    put:
+      operationId: updateProject
+      summary: Replace all editable project fields
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectInput'
+      responses:
+        '200':
+          description: Project updated; the existing ID is preserved.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '404':
+          $ref: '#/components/responses/ProjectNotFound'
+        '500':
+          $ref: '#/components/responses/PersistenceFailure'
+
+    delete:
+      operationId: deleteProject
+      summary: Delete a project
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '204':
+          description: Project deleted; response body is empty.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/InvalidId'
+        '404':
+          $ref: '#/components/responses/ProjectNotFound'
+        '500':
+          $ref: '#/components/responses/PersistenceFailure'
+
+  /health:
+    get:
+      operationId: health
+      summary: Check process health
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: HTTP process is running.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/info:
+    get:
+      operationId: serviceInfo
+      summary: Return service identity and version
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Service information.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/statistics:
+    get:
+      operationId: projectStatistics
+      summary: Return aggregate project statistics
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Statistics computed from project copies.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectStatistics'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Client correlation ID. If absent or invalid, the server generates one.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      description: Positive decimal project ID.
+      schema:
+        type: integer
+        format: uint64
+        minimum: 1
+
+  headers:
+    RequestId:
+      description: Correlation ID used for this request.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 64
+        pattern: '^[A-Za-z0-9._-]+$'
+
+  schemas:
+    Project:
+      type: object
+      required: [id, name, techStack, description, status]
+      properties:
+        id:
+          type: integer
+          format: uint64
+          minimum: 1
+          readOnly: true
+        name:
+          type: string
+        techStack:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        status:
+          type: string
+
+    ProjectInput:
+      type: object
+      additionalProperties: false
+      required: [name, techStack, description, status]
+      properties:
+        name:
+          type: string
+        techStack:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        status:
+          type: string
+
+    ServiceInfo:
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          type: string
+          example: DevManager
+        version:
+          type: string
+          example: 0.4.0
+
+    ProjectStatistics:
+      type: object
+      required: [totalProjects, status, technology]
+      properties:
+        totalProjects:
+          type: integer
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/CountMap'
+        technology:
+          $ref: '#/components/schemas/CountMap'
+
+    CountMap:
+      type: object
+      additionalProperties:
+        type: integer
+        minimum: 1
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+  responses:
+    InvalidQuery:
+      description: Query parameters are unknown, repeated, empty, or mutually exclusive.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidQuery:
+              value:
+                error:
+                  code: invalid_query
+                  message: Project query is invalid
+    InvalidRequest:
+      description: Request JSON or path ID is invalid.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidRequest:
+              value:
+                error:
+                  code: invalid_request
+                  message: Project input is invalid
+            invalidJson:
+              value:
+                error:
+                  code: invalid_json
+                  message: Request body is not valid JSON
+    InvalidId:
+      description: Project ID is not a positive decimal integer.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            invalidId:
+              value:
+                error:
+                  code: invalid_id
+                  message: Project ID is invalid
+    ProjectNotFound:
+      description: Project ID does not exist.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            notFound:
+              value:
+                error:
+                  code: project_not_found
+                  message: Project does not exist
+    IdExhausted:
+      description: No project ID remains available.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            exhausted:
+              value:
+                error:
+                  code: id_exhausted
+                  message: Project ID space is exhausted
+    PersistenceFailure:
+      description: Project persistence failed; in-memory state is unchanged.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            persistenceFailure:
+              value:
+                error:
+                  code: persistence_failure
+                  message: Persistence operation failed
+    InternalError:
+      description: Unexpected server error; internal details are not exposed.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            internalError:
+              value:
+                error:
+                  code: internal_error
+                  message: Internal server error
