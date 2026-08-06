@@ -241,12 +241,14 @@ gtest_discover_tests(DevManagerMenuTests)
 
 add_library(DevManagerHttp
     src/http/HttpError.cpp
+    src/http/RequestId.cpp
     src/http/ProjectHttpJsonMapper.cpp
     src/http/HttpServer.cpp
     src/http/ProjectHttpController.cpp
 )
 target_include_directories(DevManagerHttp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_link_libraries(DevManagerHttp PUBLIC
     DevManagerApplication
@@ -284,6 +286,7 @@ add_executable(DevManagerHttpServerIntegrationTests
 )
 target_include_directories(DevManagerHttpServerIntegrationTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_link_libraries(DevManagerHttpServerIntegrationTests PRIVATE
     DevManagerHttp

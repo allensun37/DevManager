@@ -6,22 +6,28 @@
 
 namespace devmanager {
 
-HttpServer::HttpServer(ProjectService& service, std::string host, std::uint16_t port)
+HttpServer::HttpServer(ProjectService& service,
+                       std::string host,
+                       std::uint16_t port,
+                       RequestIdGenerator requestIdGenerator)
     : service_(service),
       logger_(nullptr),
       host_(std::move(host)),
       requestedPort_(port),
-      controller_(service_, logger_) {}
+      requestIdGenerator_(std::move(requestIdGenerator)),
+      controller_(service_, logger_, requestIdGenerator_) {}
 
 HttpServer::HttpServer(ProjectService& service,
                        Logger& logger,
                        std::string host,
-                       std::uint16_t port)
+                       std::uint16_t port,
+                       RequestIdGenerator requestIdGenerator)
     : service_(service),
       logger_(&logger),
       host_(std::move(host)),
       requestedPort_(port),
-      controller_(service_, logger_) {}
+      requestIdGenerator_(std::move(requestIdGenerator)),
+      controller_(service_, logger_, requestIdGenerator_) {}
 
 void HttpServer::bind() {
     if (bound_) {
@@ -29,14 +35,20 @@ void HttpServer::bind() {
     }
 
     controller_.registerRoutes(server_);
-    if (logger_ != nullptr) {
-        server_.set_error_handler([this](const httplib::Request& request,
-                                         httplib::Response& response) {
+    server_.set_error_handler([this](const httplib::Request& request,
+                                     httplib::Response& response) {
+        const std::string candidate = request.has_header("X-Request-ID")
+                                          ? request.get_header_value("X-Request-ID")
+                                          : std::string{};
+        const std::string requestId = request_id::resolve(candidate, requestIdGenerator_);
+        response.set_header("X-Request-ID", requestId);
+        if (logger_ != nullptr) {
             logger_->error("HTTP error method=" + request.method +
                            " path=" + request.path +
-                           " status=" + std::to_string(response.status));
-        });
-    }
+                           " status=" + std::to_string(response.status) +
+                           " request_id=" + requestId);
+        }
+    });
 
     const int actualPort = requestedPort_ == 0
                                ? server_.bind_to_any_port(host_)

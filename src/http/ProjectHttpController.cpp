@@ -1,6 +1,7 @@
 #include "http/ProjectHttpController.h"
 
 #include "common/ProjectIdParser.h"
+#include "DevManagerVersion.h"
 #include "http/HttpError.h"
 #include "http/ProjectHttpJsonMapper.h"
 
@@ -162,12 +163,17 @@ void sendException(httplib::Response& response, const std::exception& error) {
 
 }  // namespace
 
-ProjectHttpController::ProjectHttpController(ProjectService& service, Logger* logger)
-    : service_(service), logger_(logger) {}
+ProjectHttpController::ProjectHttpController(ProjectService& service,
+                                             Logger* logger,
+                                             RequestIdGenerator requestIdGenerator)
+    : service_(service),
+      logger_(logger),
+      requestIdGenerator_(std::move(requestIdGenerator)) {}
 
 void ProjectHttpController::registerRoutes(httplib::Server& server) {
     server.Get("/api/projects", [this](const httplib::Request& request,
                                        httplib::Response& response) {
+        setRequestId(request, response);
         const auto started = std::chrono::steady_clock::now();
         handleList(request, response);
         logRequest(request, response, started);
@@ -175,6 +181,7 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
 
     server.Post("/api/projects", [this](const httplib::Request& request,
                                        httplib::Response& response) {
+        setRequestId(request, response);
         const auto started = std::chrono::steady_clock::now();
         handleCreate(request, response);
         logRequest(request, response, started);
@@ -182,6 +189,7 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
 
     server.Put(R"(/api/projects/([^/]+))",
                [this](const httplib::Request& request, httplib::Response& response) {
+                   setRequestId(request, response);
                    const auto started = std::chrono::steady_clock::now();
                    handleUpdate(request, response);
                    logRequest(request, response, started);
@@ -189,10 +197,43 @@ void ProjectHttpController::registerRoutes(httplib::Server& server) {
 
     server.Delete(R"(/api/projects/([^/]+))",
                   [this](const httplib::Request& request, httplib::Response& response) {
+                      setRequestId(request, response);
                       const auto started = std::chrono::steady_clock::now();
                       handleDelete(request, response);
                       logRequest(request, response, started);
                   });
+
+    server.Get("/health", [this](const httplib::Request& request,
+                                  httplib::Response& response) {
+        setRequestId(request, response);
+        const auto started = std::chrono::steady_clock::now();
+        handleHealth(request, response);
+        logRequest(request, response, started);
+    });
+
+    server.Get("/api/info", [this](const httplib::Request& request,
+                                    httplib::Response& response) {
+        setRequestId(request, response);
+        const auto started = std::chrono::steady_clock::now();
+        handleInfo(request, response);
+        logRequest(request, response, started);
+    });
+
+    server.Get("/api/statistics", [this](const httplib::Request& request,
+                                          httplib::Response& response) {
+        setRequestId(request, response);
+        const auto started = std::chrono::steady_clock::now();
+        handleStatistics(request, response);
+        logRequest(request, response, started);
+    });
+}
+
+void ProjectHttpController::setRequestId(const httplib::Request& request,
+                                         httplib::Response& response) const {
+    const std::string candidate = request.has_header("X-Request-ID")
+                                      ? request.get_header_value("X-Request-ID")
+                                      : std::string{};
+    response.set_header("X-Request-ID", request_id::resolve(candidate, requestIdGenerator_));
 }
 
 void ProjectHttpController::logRequest(
@@ -210,6 +251,7 @@ void ProjectHttpController::logRequest(
     const std::string message = prefix + " method=" + request.method +
                                 " path=" + request.path +
                                 " status=" + std::to_string(response.status) +
+                                " request_id=" + response.get_header_value("X-Request-ID") +
                                 " duration_ms=" + std::to_string(elapsed.count());
     if (isError) {
         logger_->error(message);
@@ -346,6 +388,40 @@ void ProjectHttpController::handleUpdate(const httplib::Request& request,
 
         response.status = 200;
         response.set_content(ProjectHttpJsonMapper::toJson(*updated).dump(),
+                             kJsonContentType);
+    } catch (const std::exception& error) {
+        sendException(response, error);
+    } catch (...) {
+        sendError(response, HttpError{500, "internal_error", "Internal server error"});
+    }
+}
+
+void ProjectHttpController::handleHealth(const httplib::Request&,
+                                         httplib::Response& response) {
+    response.status = 200;
+    response.set_content(nlohmann::json{{"status", "ok"}}.dump(), kJsonContentType);
+}
+
+void ProjectHttpController::handleInfo(const httplib::Request&,
+                                       httplib::Response& response) {
+    response.status = 200;
+    response.set_content(nlohmann::json{{"name", "DevManager"},
+                                         {"version", kDevManagerVersion}}
+                             .dump(),
+                         kJsonContentType);
+}
+
+void ProjectHttpController::handleStatistics(const httplib::Request&,
+                                             httplib::Response& response) {
+    try {
+        const ProjectStatistics statistics = service_.statistics();
+        response.status = 200;
+        response.set_content(nlohmann::json{
+                                 {"totalProjects", statistics.totalProjects},
+                                 {"status", statistics.status},
+                                 {"technology", statistics.technology},
+                             }
+                                 .dump(),
                              kJsonContentType);
     } catch (const std::exception& error) {
         sendException(response, error);

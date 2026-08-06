@@ -6,7 +6,9 @@
 
 int main() {
     try {
-        devmanager::ApplicationBootstrap bootstrap(devmanager::Config{});
+        const devmanager::Config config =
+            devmanager::ConfigLoader::load("config/devmanager.json");
+        devmanager::ApplicationBootstrap bootstrap(config);
         devmanager::HttpServer server(bootstrap.service(),
                                       bootstrap.logger(),
                                       bootstrap.config().server.host,

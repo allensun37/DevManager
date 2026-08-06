@@ -1,5 +1,6 @@
 #include "application/ProjectManager.h"
 #include "application/ProjectService.h"
+#include "DevManagerVersion.h"
 #include "http/HttpServer.h"
 #include "infrastructure/logging/Logger.h"
 
@@ -87,6 +88,22 @@ httplib::Result postJson(devmanager::HttpServer& server,
     return client.Post("/api/projects", body, "application/json");
 }
 
+bool isValidRequestId(const std::string& value) {
+    if (value.empty() || value.size() > 64U) {
+        return false;
+    }
+    for (const unsigned char character : value) {
+        if ((character >= 'a' && character <= 'z') ||
+            (character >= 'A' && character <= 'Z') ||
+            (character >= '0' && character <= '9') || character == '.' ||
+            character == '_' || character == '-') {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 TEST(HttpServerIntegrationTest, BindsDynamicPortAndStopsCleanly) {
@@ -111,6 +128,84 @@ TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 200);
     EXPECT_EQ(nlohmann::json::parse(response->body), nlohmann::json::array());
+}
+
+TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    httplib::Headers headers{{"X-Request-ID", "client.req-01"}};
+    const auto response = client.Get("/health", headers);
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+    const auto body = nlohmann::json::parse(response->body);
+    EXPECT_EQ(body, (nlohmann::json{{"status", "ok"}}));
+    EXPECT_EQ(response->get_header_value("X-Request-ID"), "client.req-01");
+}
+
+TEST(HttpServerIntegrationTest, InfoReturnsGeneratedVersion) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = get(server, "/api/info");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+    const auto body = nlohmann::json::parse(response->body);
+    EXPECT_EQ(body.at("name"), "DevManager");
+    EXPECT_EQ(body.at("version"), devmanager::kDevManagerVersion);
+    EXPECT_TRUE(isValidRequestId(response->get_header_value("X-Request-ID")));
+}
+
+TEST(HttpServerIntegrationTest, StatisticsReturnsNormalizedProjectCounts) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    ASSERT_EQ(manager.addProject("One", {" C++ ", "c++", "CMake"}, "", " Active "), 1U);
+    ASSERT_EQ(manager.addProject("Two", {"CMAKE", "Rust"}, "", "active"), 2U);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = get(server, "/api/statistics");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 200);
+    const auto body = nlohmann::json::parse(response->body);
+    EXPECT_EQ(body.at("totalProjects"), 2U);
+    EXPECT_EQ(body.at("status").at("active"), 2U);
+    EXPECT_EQ(body.at("technology").at("c++"), 1U);
+    EXPECT_EQ(body.at("technology").at("cmake"), 2U);
+    EXPECT_EQ(body.at("technology").at("rust"), 1U);
+    EXPECT_TRUE(isValidRequestId(response->get_header_value("X-Request-ID")));
+}
+
+TEST(HttpServerIntegrationTest, MissingOrInvalidRequestIdIsReplacedForSuccessAndNotFound) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    httplib::Headers invalid{{"X-Request-ID", "bad id with spaces"}};
+    const auto success = client.Get("/health", invalid);
+    ASSERT_TRUE(success);
+    ASSERT_EQ(success->status, 200);
+    EXPECT_TRUE(isValidRequestId(success->get_header_value("X-Request-ID")));
+    EXPECT_NE(success->get_header_value("X-Request-ID"), "bad id with spaces");
+
+    const auto notFound = client.Get("/missing");
+    ASSERT_TRUE(notFound);
+    EXPECT_EQ(notFound->status, 404);
+    EXPECT_TRUE(isValidRequestId(notFound->get_header_value("X-Request-ID")));
 }
 
 TEST(HttpServerIntegrationTest, DeleteMissingProjectReturnsNotFoundError) {
@@ -205,15 +300,18 @@ TEST(HttpServerIntegrationTest, LogsStartupAndHttpErrorsThroughInjectedLogger) {
         ASSERT_TRUE(running.waitUntilReady());
 
         httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
-        const auto response = client.Get("/unknown");
+        httplib::Headers headers{{"X-Request-ID", "logged.req"}};
+        const auto response = client.Get("/unknown", headers);
         ASSERT_TRUE(response);
         EXPECT_EQ(response->status, 404);
+        EXPECT_EQ(response->get_header_value("X-Request-ID"), "logged.req");
     }
 
     const std::string contents = readLoggerFile(logPath);
     EXPECT_NE(contents.find("HTTP server started"), std::string::npos);
     EXPECT_NE(contents.find("HTTP error"), std::string::npos);
     EXPECT_NE(contents.find("status=404"), std::string::npos);
+    EXPECT_NE(contents.find("request_id=logged.req"), std::string::npos);
 
     std::error_code error;
     std::filesystem::remove_all(directory, error);

@@ -450,6 +450,7 @@ TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack)
     const auto failureBody = nlohmann::json::parse(failed->body);
     EXPECT_EQ(failureBody.at("error").at("code"), "persistence_failure");
     EXPECT_EQ(failureBody.at("error").at("message"), "Persistence operation failed");
+    EXPECT_FALSE(failed->get_header_value("X-Request-ID").empty());
     EXPECT_TRUE(manager.listProjects().empty());
     EXPECT_TRUE(repository.savedStores().empty());
 
