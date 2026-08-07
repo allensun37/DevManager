@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -175,6 +178,17 @@ TEST(ProjectQueryEvaluatorTest, CountsFilteredProjectsWithoutOffsetOrLimit) {
     query.limit = 1;
 
     EXPECT_EQ(devmanager::ProjectQueryEvaluator::count(projects, query), 2U);
+}
+
+TEST(ProjectQueryEvaluatorTest, DocumentsWhetherCountOverflowCanBeConstructedOnThisPlatform) {
+    if constexpr (std::numeric_limits<std::size_t>::digits >
+                  std::numeric_limits<std::uint64_t>::digits) {
+        GTEST_SKIP() << "Exercising the overflow guard requires more than UINT64_MAX projects";
+    } else {
+        const std::vector<devmanager::Project> projects;
+        EXPECT_LE(projects.max_size(),
+                  static_cast<std::size_t>(std::numeric_limits<std::uint64_t>::max()));
+    }
 }
 
 }  // namespace

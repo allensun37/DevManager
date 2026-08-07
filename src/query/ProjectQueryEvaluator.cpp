@@ -7,6 +7,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -131,6 +132,9 @@ std::uint64_t ProjectQueryEvaluator::count(const std::vector<Project>& projects,
     std::uint64_t total = 0;
     for (const Project& project : projects) {
         if (matches(project, projectQuery)) {
+            if (total == std::numeric_limits<std::uint64_t>::max()) {
+                throw std::overflow_error("Project count exceeds uint64 range");
+            }
             ++total;
         }
     }
