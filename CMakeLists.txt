@@ -195,6 +195,17 @@ target_link_libraries(DevManagerRepository PUBLIC
     DevManagerQuery
 )
 
+add_library(DevManagerSqliteRepository
+    src/repository/SqliteProjectRepository.cpp
+)
+target_include_directories(DevManagerSqliteRepository PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerSqliteRepository PUBLIC
+    DevManagerRepository
+    DevManagerSqliteInfrastructure
+)
+
 add_library(DevManagerMenu src/menu/MenuController.cpp)
 target_include_directories(DevManagerMenu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -339,6 +350,16 @@ target_link_libraries(DevManagerSqliteProjectIdCodecTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerSqliteProjectIdCodecTests)
+
+add_executable(DevManagerSqliteProjectRepositoryTests
+    tests/repository/SqliteProjectRepositoryTests.cpp
+)
+target_link_libraries(DevManagerSqliteProjectRepositoryTests PRIVATE
+    DevManagerSqliteRepository
+    SQLite::SQLite3
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerSqliteProjectRepositoryTests)
 
 add_executable(DevManagerSqliteInfrastructureTests
     tests/infrastructure/sqlite/SqliteConnectionTests.cpp
