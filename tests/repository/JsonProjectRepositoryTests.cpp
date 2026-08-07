@@ -1,5 +1,6 @@
 #include "repository/JsonProjectRepository.h"
 #include "repository/FileReplacer.h"
+#include "repository/ProjectStoreValidator.h"
 
 #include <gtest/gtest.h>
 
@@ -12,8 +13,11 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -46,8 +50,39 @@ protected:
     std::filesystem::path filePath;
 };
 
-devmanager::Project makeProject(devmanager::ProjectId id) {
-    return devmanager::Project{id, "Project", {"C++"}, "Description", "In progress"};
+devmanager::Project makeProject(
+    devmanager::ProjectId id,
+    std::string name = "Project",
+    std::vector<std::string> techStack = {"C++"},
+    std::string description = "Description",
+    std::string status = "In progress") {
+    return devmanager::Project{id, std::move(name), std::move(techStack),
+                               std::move(description), std::move(status)};
+}
+
+std::string readFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+bool hasProjectTemporaryFile(const std::filesystem::path& directory) {
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(directory)) {
+        if (entry.path().filename().string().find("projects.json.tmp-") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<devmanager::ProjectId> projectIds(
+    const std::vector<devmanager::Project>& projects) {
+    std::vector<devmanager::ProjectId> ids;
+    ids.reserve(projects.size());
+    for (const devmanager::Project& project : projects) {
+        ids.push_back(project.id());
+    }
+    return ids;
 }
 
 class FailingFileReplacer final : public devmanager::FileReplacer {
@@ -56,6 +91,21 @@ public:
         throw std::runtime_error("Injected replacement failure");
     }
 };
+
+TEST(ProjectStoreValidatorTest, EnforcesSharedProjectStoreRules) {
+    EXPECT_NO_THROW(devmanager::validateProjectStore(devmanager::ProjectStore{2, {}}));
+    EXPECT_THROW(devmanager::validateProjectStore(devmanager::ProjectStore{0, {}}),
+                 std::invalid_argument);
+    EXPECT_THROW(devmanager::validateProjectStore(
+                     devmanager::ProjectStore{1, {makeProject(0)}}),
+                 std::invalid_argument);
+    EXPECT_THROW(devmanager::validateProjectStore(
+                     devmanager::ProjectStore{3, {makeProject(1), makeProject(1)}}),
+                 std::invalid_argument);
+    EXPECT_THROW(devmanager::validateProjectStore(
+                     devmanager::ProjectStore{2, {makeProject(2)}}),
+                 std::invalid_argument);
+}
 
 TEST_F(JsonProjectRepositoryTest, MissingDataFileCreatesAnEmptyStore) {
     const devmanager::JsonProjectRepository repository(filePath);
@@ -206,6 +256,200 @@ TEST_F(JsonProjectRepositoryTest, PreservesTheOriginalFileAndCleansTemporaryFile
         }
     }
     EXPECT_FALSE(hasTemporaryFile);
+}
+
+TEST_F(JsonProjectRepositoryTest, CreatePersistsTheProjectAndExactNextId) {
+    devmanager::JsonProjectRepository repository(filePath);
+    const devmanager::Project project =
+        makeProject(1, "Created", {"C++", "SQLite"}, "Created description", "Ready");
+
+    repository.create(project, 7);
+
+    const devmanager::ProjectStore stored = repository.loadStore();
+    EXPECT_EQ(stored.nextId, 7);
+    ASSERT_EQ(stored.projects.size(), 1U);
+    EXPECT_EQ(stored.projects[0].id(), 1);
+    EXPECT_EQ(stored.projects[0].name(), "Created");
+    EXPECT_EQ(stored.projects[0].techStack(),
+              (std::vector<std::string>{"C++", "SQLite"}));
+    EXPECT_EQ(stored.projects[0].description(), "Created description");
+    EXPECT_EQ(stored.projects[0].status(), "Ready");
+}
+
+TEST_F(JsonProjectRepositoryTest, CreateRejectsADuplicateIdWithoutChangingTheFile) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({5, {makeProject(1, "Original")}});
+    const std::string originalContent = readFile(filePath);
+
+    EXPECT_THROW(repository.create(makeProject(1, "Duplicate"), 6), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+}
+
+TEST_F(JsonProjectRepositoryTest, UpdateReplacesEveryEditableFieldAndPreservesIdAndNextId) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({9, {makeProject(4, "Before", {"C++"}, "Old", "Planned")}});
+
+    repository.update(makeProject(4, "After", {"Rust", "CMake"}, "New", "Complete"));
+
+    const devmanager::ProjectStore stored = repository.loadStore();
+    EXPECT_EQ(stored.nextId, 9);
+    ASSERT_EQ(stored.projects.size(), 1U);
+    EXPECT_EQ(stored.projects[0].id(), 4);
+    EXPECT_EQ(stored.projects[0].name(), "After");
+    EXPECT_EQ(stored.projects[0].techStack(),
+              (std::vector<std::string>{"Rust", "CMake"}));
+    EXPECT_EQ(stored.projects[0].description(), "New");
+    EXPECT_EQ(stored.projects[0].status(), "Complete");
+}
+
+TEST_F(JsonProjectRepositoryTest, UpdateRejectsAMissingIdWithoutChangingTheFile) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({5, {makeProject(1, "Original")}});
+    const std::string originalContent = readFile(filePath);
+
+    EXPECT_THROW(repository.update(makeProject(2, "Missing")), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+}
+
+TEST_F(JsonProjectRepositoryTest, RemoveDeletesExactlyOneProjectAndPreservesNextId) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({8, {makeProject(1), makeProject(2), makeProject(3)}});
+
+    repository.remove(2);
+
+    const devmanager::ProjectStore stored = repository.loadStore();
+    EXPECT_EQ(stored.nextId, 8);
+    EXPECT_EQ(projectIds(stored.projects),
+              (std::vector<devmanager::ProjectId>{1, 3}));
+}
+
+TEST_F(JsonProjectRepositoryTest, RemoveRejectsAMissingIdWithoutChangingTheFile) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({5, {makeProject(1, "Original")}});
+    const std::string originalContent = readFile(filePath);
+
+    EXPECT_THROW(repository.remove(2), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+}
+
+TEST_F(JsonProjectRepositoryTest, FindByIdReturnsACopyOrNullopt) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({3, {makeProject(1, "Original"), makeProject(2, "Other")}});
+
+    const std::optional<devmanager::Project> found = repository.findById(1);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->name(), "Original");
+    EXPECT_FALSE(repository.findById(99).has_value());
+
+    repository.update(makeProject(1, "Updated"));
+    EXPECT_EQ(found->name(), "Original");
+    EXPECT_EQ(repository.findById(1)->name(), "Updated");
+}
+
+TEST_F(JsonProjectRepositoryTest, QueryUsesNormalizationSortingAndWindowWhileCountIgnoresWindow) {
+    const devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({4,
+                          {makeProject(3, "Zeta API", {"Rust", "C++"}, "", " Active "),
+                           makeProject(1, "Alpha API", {"cpp"}, "", "active"),
+                           makeProject(2, "alpha api", {"C++20"}, "", "ACTIVE")}});
+    devmanager::ProjectQuery query;
+    query.name = "API";
+    query.status = " active ";
+    query.technology = " c++ ";
+    query.sort = devmanager::ProjectSortKey::Name;
+    query.offset = 1;
+    query.limit = 1;
+
+    EXPECT_EQ(projectIds(repository.query(query)),
+              (std::vector<devmanager::ProjectId>{2}));
+    EXPECT_EQ(repository.count(query), 3U);
+}
+
+TEST_F(JsonProjectRepositoryTest, RawTechnologyTagOrderAndDuplicatesRoundTripExactly) {
+    devmanager::JsonProjectRepository repository(filePath);
+    const std::vector<std::string> tags{"C++", "Rust", "C++", "  CMake  "};
+
+    repository.create(makeProject(1, "Tags", tags), 2);
+
+    const std::optional<devmanager::Project> restored = repository.findById(1);
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(restored->techStack(), tags);
+}
+
+TEST_F(JsonProjectRepositoryTest, CreateReplacementFailurePreservesFileAndCleansTemporaryFile) {
+    devmanager::JsonProjectRepository(filePath).saveStore({2, {makeProject(1)}});
+    const std::string originalContent = readFile(filePath);
+    devmanager::JsonProjectRepository repository(
+        filePath, std::make_shared<FailingFileReplacer>());
+
+    EXPECT_THROW(repository.create(makeProject(2), 3), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+    EXPECT_FALSE(hasProjectTemporaryFile(directory));
+}
+
+TEST_F(JsonProjectRepositoryTest, UpdateReplacementFailurePreservesFileAndCleansTemporaryFile) {
+    devmanager::JsonProjectRepository(filePath).saveStore({2, {makeProject(1, "Original")}});
+    const std::string originalContent = readFile(filePath);
+    devmanager::JsonProjectRepository repository(
+        filePath, std::make_shared<FailingFileReplacer>());
+
+    EXPECT_THROW(repository.update(makeProject(1, "Updated")), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+    EXPECT_FALSE(hasProjectTemporaryFile(directory));
+}
+
+TEST_F(JsonProjectRepositoryTest, RemoveReplacementFailurePreservesFileAndCleansTemporaryFile) {
+    devmanager::JsonProjectRepository(filePath).saveStore({3, {makeProject(1), makeProject(2)}});
+    const std::string originalContent = readFile(filePath);
+    devmanager::JsonProjectRepository repository(
+        filePath, std::make_shared<FailingFileReplacer>());
+
+    EXPECT_THROW(repository.remove(1), std::runtime_error);
+
+    EXPECT_EQ(readFile(filePath), originalContent);
+    EXPECT_FALSE(hasProjectTemporaryFile(directory));
+}
+
+TEST_F(JsonProjectRepositoryTest, DeleteLastProjectKeepsForwardNextIdInExistingStore) {
+    devmanager::JsonProjectRepository repository(filePath);
+    repository.saveStore({2, {makeProject(1)}});
+
+    repository.remove(1);
+
+    const devmanager::ProjectStore stored = repository.loadStore();
+    EXPECT_EQ(stored.nextId, 2);
+    EXPECT_TRUE(stored.projects.empty());
+}
+
+TEST_F(JsonProjectRepositoryTest, RejectsEverySemanticInvalidSnapshot) {
+    const std::vector<devmanager::ProjectStore> invalidStores{
+        {0, {}},
+        {1, {makeProject(0)}},
+        {3, {makeProject(1), makeProject(1)}},
+        {2, {makeProject(2)}},
+    };
+    const devmanager::JsonProjectRepository repository(filePath);
+
+    for (const devmanager::ProjectStore& invalidStore : invalidStores) {
+        nlohmann::json payload;
+        payload["nextId"] = invalidStore.nextId;
+        payload["projects"] = nlohmann::json::array();
+        for (const devmanager::Project& project : invalidStore.projects) {
+            payload["projects"].push_back(project.toJson());
+        }
+        {
+            std::ofstream output(filePath, std::ios::trunc);
+            ASSERT_TRUE(output.is_open());
+            output << payload.dump();
+        }
+
+        EXPECT_THROW(static_cast<void>(repository.loadStore()), std::runtime_error);
+    }
 }
 
 }  // namespace

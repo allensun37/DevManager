@@ -125,6 +125,7 @@ target_link_libraries(DevManagerApplication PUBLIC
 add_library(DevManagerRepository
     src/repository/FileReplacer.cpp
     src/repository/JsonProjectRepository.cpp
+    src/repository/ProjectStoreValidator.cpp
 )
 target_include_directories(DevManagerRepository PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -2,6 +2,7 @@
 
 #include "query/ProjectQueryEvaluator.h"
 #include "repository/FileReplacer.h"
+#include "repository/ProjectStoreValidator.h"
 
 #include <algorithm>
 #include <atomic>
@@ -9,38 +10,9 @@
 #include <fstream>
 #include <memory>
 #include <stdexcept>
-#include <unordered_set>
 #include <utility>
 
 namespace {
-
-void validateProjectStore(const devmanager::ProjectStore& store) {
-    if (store.projects.empty()) {
-        if (store.nextId == 0) {
-            throw std::invalid_argument("nextId must be greater than zero");
-        }
-        return;
-    }
-
-    std::unordered_set<devmanager::ProjectId> projectIds;
-    devmanager::ProjectId maximumId = 0;
-    for (const devmanager::Project& project : store.projects) {
-        const devmanager::ProjectId id = project.id();
-        if (id == 0) {
-            throw std::invalid_argument("Project IDs must be greater than zero");
-        }
-        if (!projectIds.insert(id).second) {
-            throw std::invalid_argument("Project IDs must be unique");
-        }
-        if (id > maximumId) {
-            maximumId = id;
-        }
-    }
-
-    if (store.nextId <= maximumId) {
-        throw std::invalid_argument("nextId must exceed every project ID");
-    }
-}
 
 std::filesystem::path temporaryFilePath(const std::filesystem::path& targetFile,
                                         const std::filesystem::path& targetDirectory) {
@@ -87,7 +59,7 @@ ProjectStore JsonProjectRepository::loadStore() const {
             store.projects.push_back(Project::fromJson(projectPayload));
         }
 
-        validateProjectStore(store);
+        devmanager::validateProjectStore(store);
         return store;
     } catch (const std::exception& error) {
         throw std::runtime_error("Invalid project data file '" + filePath_.string() +
@@ -160,7 +132,7 @@ std::uint64_t JsonProjectRepository::count(const ProjectQuery& projectQuery) con
 
 void JsonProjectRepository::saveStore(const ProjectStore& store) const {
     try {
-        validateProjectStore(store);
+        devmanager::validateProjectStore(store);
     } catch (const std::exception& error) {
         throw std::runtime_error("Invalid project store for '" + filePath_.string() +
                                  "': " + error.what());
