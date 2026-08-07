@@ -1,5 +1,5 @@
 #include "application/ProjectManager.h"
-#include "common/AsciiText.h"
+#include "common/ProjectSearchText.h"
 #include "repository/ProjectRepository.h"
 
 #include <algorithm>
@@ -7,42 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-
-namespace {
-
-std::string normalizeTextForSearch(std::string_view value) {
-    return devmanager::ascii::toLower(value);
-}
-
-bool isAsciiLetterOrDigit(unsigned char character) {
-    return (character >= 'A' && character <= 'Z') ||
-           (character >= 'a' && character <= 'z') ||
-           (character >= '0' && character <= '9');
-}
-
-std::string normalizeTechnologyForSearch(std::string_view value) {
-    std::string normalized;
-    normalized.reserve(value.size());
-
-    for (std::size_t index = 0; index < value.size(); ++index) {
-        const unsigned char character = static_cast<unsigned char>(value[index]);
-        if (character == '+' && index + 1 < value.size() && value[index + 1] == '+') {
-            normalized += "pp";
-            ++index;
-            continue;
-        }
-
-        if (character < 128 && !isAsciiLetterOrDigit(character)) {
-            continue;
-        }
-
-        normalized.push_back(static_cast<char>(character));
-    }
-
-    return devmanager::ascii::toLower(normalized);
-}
-
-}  // namespace
 
 namespace devmanager {
 
@@ -116,14 +80,15 @@ const std::vector<Project>& ProjectManager::listProjects() const noexcept {
 }
 
 std::vector<Project> ProjectManager::searchByName(std::string_view query) const {
-    const std::string normalizedQuery = normalizeTextForSearch(query);
+    const std::string normalizedQuery = project_search_text::normalizeName(query);
     if (normalizedQuery.empty()) {
         return {};
     }
 
     std::vector<Project> matches;
     for (const Project& project : projects_) {
-        if (normalizeTextForSearch(project.name()).find(normalizedQuery) != std::string::npos) {
+        if (project_search_text::normalizeName(project.name()).find(normalizedQuery) !=
+            std::string::npos) {
             matches.push_back(project);
         }
     }
@@ -132,7 +97,7 @@ std::vector<Project> ProjectManager::searchByName(std::string_view query) const 
 }
 
 std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) const {
-    const std::string normalizedQuery = normalizeTechnologyForSearch(query);
+    const std::string normalizedQuery = project_search_text::normalizeTechnology(query);
     if (normalizedQuery.empty()) {
         return {};
     }
@@ -141,7 +106,8 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
     for (const Project& project : projects_) {
         const bool hasMatch = std::any_of(project.techStack().begin(), project.techStack().end(),
                                           [&normalizedQuery](const std::string& technology) {
-                                              return normalizeTechnologyForSearch(technology)
+                                              return project_search_text::normalizeTechnology(
+                                                         technology)
                                                          .find(normalizedQuery) != std::string::npos;
                                           });
         if (hasMatch) {
@@ -153,14 +119,14 @@ std::vector<Project> ProjectManager::searchByTechnology(std::string_view query) 
 }
 
 std::vector<Project> ProjectManager::filterByStatus(std::string_view status) const {
-    const std::string normalizedStatus = ascii::toLower(ascii::trim(status));
+    const std::string normalizedStatus = project_search_text::normalizeStatus(status);
     if (normalizedStatus.empty()) {
         return {};
     }
 
     std::vector<Project> matches;
     for (const Project& project : projects_) {
-        if (ascii::toLower(ascii::trim(project.status())) == normalizedStatus) {
+        if (project_search_text::normalizeStatus(project.status()) == normalizedStatus) {
             matches.push_back(project);
         }
     }
@@ -175,11 +141,11 @@ std::vector<Project> ProjectManager::sortedProjects(ProjectSortKey key) const {
         }
 
         const std::string leftValue = key == ProjectSortKey::Name
-                                          ? ascii::toLower(left.name())
-                                          : ascii::toLower(left.status());
+                                          ? project_search_text::nameSortKey(left.name())
+                                          : project_search_text::statusSortKey(left.status());
         const std::string rightValue = key == ProjectSortKey::Name
-                                           ? ascii::toLower(right.name())
-                                           : ascii::toLower(right.status());
+                                           ? project_search_text::nameSortKey(right.name())
+                                           : project_search_text::statusSortKey(right.status());
         if (leftValue == rightValue) {
             return left.id() < right.id();
         }

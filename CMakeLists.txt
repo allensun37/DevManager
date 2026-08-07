@@ -72,6 +72,7 @@ FetchContent_MakeAvailable(spdlog)
 add_library(DevManagerCommon
     src/common/AsciiText.cpp
     src/common/ProjectIdParser.cpp
+    src/common/ProjectSearchText.cpp
 )
 target_include_directories(DevManagerCommon PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -95,6 +96,15 @@ target_include_directories(DevManagerDomain PUBLIC
 )
 target_link_libraries(DevManagerDomain PUBLIC nlohmann_json::nlohmann_json)
 
+add_library(DevManagerQuery src/query/ProjectQueryEvaluator.cpp)
+target_include_directories(DevManagerQuery PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerQuery PUBLIC
+    DevManagerCommon
+    DevManagerDomain
+)
+
 add_library(DevManagerApplication
     src/application/ProjectManager.cpp
     src/application/ApplicationBootstrap.cpp
@@ -106,6 +116,7 @@ target_include_directories(DevManagerApplication PUBLIC
 target_link_libraries(DevManagerApplication PUBLIC
     DevManagerCommon
     DevManagerDomain
+    DevManagerQuery
     DevManagerConfig
     DevManagerLogger
     DevManagerRepository
@@ -168,6 +179,28 @@ target_include_directories(DevManagerAsciiTextTests PRIVATE
 )
 target_link_libraries(DevManagerAsciiTextTests PRIVATE DevManagerCommon GTest::gtest_main)
 gtest_discover_tests(DevManagerAsciiTextTests)
+
+add_executable(DevManagerProjectSearchTextTests tests/common/ProjectSearchTextTests.cpp)
+target_include_directories(DevManagerProjectSearchTextTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectSearchTextTests PRIVATE
+    DevManagerCommon
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectSearchTextTests)
+
+add_executable(DevManagerProjectQueryEvaluatorTests
+    tests/query/ProjectQueryEvaluatorTests.cpp
+)
+target_include_directories(DevManagerProjectQueryEvaluatorTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerProjectQueryEvaluatorTests PRIVATE
+    DevManagerQuery
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectQueryEvaluatorTests)
 
 add_executable(DevManagerProjectIdParserTests tests/common/ProjectIdParserTests.cpp)
 target_include_directories(DevManagerProjectIdParserTests PRIVATE

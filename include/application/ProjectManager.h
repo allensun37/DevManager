@@ -1,6 +1,7 @@
 #pragma once
 
 #include "domain/Project.h"
+#include "query/ProjectQuery.h"
 
 #include <string>
 #include <string_view>
@@ -10,12 +11,6 @@ namespace devmanager {
 
 class ProjectRepository;
 struct ProjectStore;
-
-enum class ProjectSortKey {
-    Id,
-    Name,
-    Status,
-};
 
 class ProjectManager {
 public:
