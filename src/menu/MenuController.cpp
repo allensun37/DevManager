@@ -1,10 +1,9 @@
 #include "menu/MenuController.h"
 
 #include "common/AsciiText.h"
+#include "common/ProjectIdParser.h"
 
 #include <algorithm>
-#include <exception>
-#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -28,28 +27,6 @@ std::vector<std::string> splitTechnologyTags(const std::string& input) {
     }
 
     return tags;
-}
-
-std::optional<devmanager::ProjectId> parseProjectId(const std::string& input) {
-    const std::string trimmed = devmanager::ascii::trim(input);
-    if (trimmed.empty()) {
-        return std::nullopt;
-    }
-    if (trimmed.front() == '+' || trimmed.front() == '-') {
-        return std::nullopt;
-    }
-
-    try {
-        std::size_t parsedCharacters = 0;
-        const unsigned long long value = std::stoull(trimmed, &parsedCharacters);
-        if (parsedCharacters != trimmed.size() || value == 0 ||
-            value > std::numeric_limits<devmanager::ProjectId>::max()) {
-            return std::nullopt;
-        }
-        return static_cast<devmanager::ProjectId>(value);
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
 }
 
 }  // namespace

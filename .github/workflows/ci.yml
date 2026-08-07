@@ -20,6 +20,25 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up pinned Python for OpenAPI validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.4'
+          cache: pip
+          cache-dependency-path: scripts/requirements-openapi.txt
+
+      - name: Install pinned OpenAPI validator
+        run: python -m pip install --disable-pip-version-check -r scripts/requirements-openapi.txt
+
+      - name: Validate OpenAPI contract markers
+        run: python scripts/validate_openapi_contract.py
+
+      - name: Validate v0.4 release contract
+        run: python scripts/validate_release_contract.py
+
+      - name: Validate OpenAPI schema
+        run: python -m openapi_spec_validator docs/openapi.yaml
+
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
