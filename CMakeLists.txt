@@ -95,6 +95,16 @@ if(UNIX AND NOT APPLE)
 endif()
 add_library(SQLite::SQLite3 ALIAS DevManagerSqliteC)
 
+add_library(DevManagerSqliteInfrastructure
+    src/infrastructure/sqlite/SqliteConnection.cpp
+    src/infrastructure/sqlite/SqliteStatement.cpp
+    src/infrastructure/sqlite/SqliteTransaction.cpp
+)
+target_include_directories(DevManagerSqliteInfrastructure PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerSqliteInfrastructure PRIVATE SQLite::SQLite3)
+
 add_library(DevManagerCommon
     src/common/AsciiText.cpp
     src/common/ProjectIdParser.cpp
@@ -306,6 +316,18 @@ target_link_libraries(DevManagerSqliteProjectIdCodecTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerSqliteProjectIdCodecTests)
+
+add_executable(DevManagerSqliteInfrastructureTests
+    tests/infrastructure/sqlite/SqliteConnectionTests.cpp
+)
+target_include_directories(DevManagerSqliteInfrastructureTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerSqliteInfrastructureTests PRIVATE
+    DevManagerSqliteInfrastructure
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerSqliteInfrastructureTests)
 
 add_executable(DevManagerMenuTests
     tests/menu/MenuControllerTests.cpp
