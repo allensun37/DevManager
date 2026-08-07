@@ -74,7 +74,7 @@ TEST(ProjectServiceTest, ConcurrentAddsAreSerializedByTheServiceMutex) {
     std::vector<std::thread> workers;
     workers.reserve(threadCount);
     for (int thread = 0; thread < threadCount; ++thread) {
-        workers.emplace_back([&service, thread]() {
+        workers.emplace_back([&service, thread, projectsPerThread]() {
             for (int index = 0; index < projectsPerThread; ++index) {
                 static_cast<void>(service.addProject(
                     "Project " + std::to_string(thread) + "-" + std::to_string(index),
