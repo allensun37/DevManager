@@ -1,6 +1,7 @@
 #include "repository/SqliteProjectIdCodec.h"
 
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <array>
 #include <limits>
@@ -79,6 +80,11 @@ TEST(SqliteProjectIdCodecTest, RoundTripsRepresentativeUnsignedValues) {
                       devmanager::SqliteProjectIdCodec::encode(value)),
                   value);
     }
+}
+
+TEST(SqliteProjectIdCodecTest, LinksThePinnedSqliteVersion) {
+    EXPECT_EQ(sqlite3_libversion_number(), 3'053'004);
+    EXPECT_STREQ(sqlite3_libversion(), "3.53.4");
 }
 
 }  // namespace

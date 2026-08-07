@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(DevManager VERSION 0.4.0 LANGUAGES C CXX)
 
 set(DEVMANAGER_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -19,12 +23,12 @@ if(MSVC)
 endif()
 
 include(FetchContent)
+find_package(Threads REQUIRED)
 
 FetchContent_Declare(
     nlohmann_json
     URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
     URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -73,7 +77,6 @@ FetchContent_Declare(
     sqlite_amalgamation
     URL https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip
     URL_HASH SHA3_256=628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(sqlite_amalgamation)
 
@@ -83,6 +86,13 @@ add_library(DevManagerSqliteC STATIC
 target_include_directories(DevManagerSqliteC PUBLIC
     ${sqlite_amalgamation_SOURCE_DIR}
 )
+target_link_libraries(DevManagerSqliteC PUBLIC
+    Threads::Threads
+    ${CMAKE_DL_LIBS}
+)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(DevManagerSqliteC PUBLIC m)
+endif()
 add_library(SQLite::SQLite3 ALIAS DevManagerSqliteC)
 
 add_library(DevManagerCommon
@@ -292,6 +302,7 @@ add_executable(DevManagerSqliteProjectIdCodecTests
 )
 target_link_libraries(DevManagerSqliteProjectIdCodecTests PRIVATE
     DevManagerRepository
+    SQLite::SQLite3
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerSqliteProjectIdCodecTests)
