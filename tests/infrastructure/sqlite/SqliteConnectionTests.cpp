@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -105,6 +106,17 @@ TEST(SqliteStatementTest, BindInt64AndStepRowReadAllRowsUntilDone) {
     EXPECT_FALSE(select.stepRow());
 }
 
+TEST(SqliteStatementTest, BindInt64RoundTripsMaximumInt64Value) {
+    SqliteConnection connection(":memory:");
+    auto statement = connection.prepare("SELECT ?1");
+    constexpr std::int64_t value = std::numeric_limits<std::int64_t>::max();
+    statement.bindInt64(1, value);
+
+    ASSERT_TRUE(statement.stepRow());
+    EXPECT_EQ(statement.columnInt64(0), value);
+    EXPECT_FALSE(statement.stepRow());
+}
+
 TEST(SqliteStatementTest, BindsEmptyTextAsTextRatherThanNull) {
     SqliteConnection connection(":memory:");
     auto statement = connection.prepare("SELECT typeof(?1), ?1");
@@ -120,6 +132,18 @@ TEST(SqliteStatementTest, ExecuteDoneRejectsStatementsThatProduceRows) {
     auto statement = connection.prepare("SELECT 1");
 
     EXPECT_THROW(statement.executeDone(), std::runtime_error);
+}
+
+TEST(SqliteStatementTest, StepRowThrowsWhenSqliteReportsConstraintError) {
+    SqliteConnection connection(":memory:");
+    connection.execute("CREATE TABLE unique_values (value INTEGER UNIQUE)");
+    connection.execute("INSERT INTO unique_values(value) VALUES (7)");
+
+    auto duplicateInsert = connection.prepare(
+        "INSERT INTO unique_values(value) VALUES (?1)");
+    duplicateInsert.bindInt64(1, 7);
+
+    EXPECT_THROW(static_cast<void>(duplicateInsert.stepRow()), std::runtime_error);
 }
 
 TEST(SqliteStatementTest, RejectsNullTextInvalidColumnsAndColumnsWithoutCurrentRow) {
