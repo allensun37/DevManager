@@ -79,6 +79,34 @@ TEST(SqliteConnectionTest, ExecuteAndPreparedTextStoreLiteralData) {
     EXPECT_EQ(count.columnInt64(0), 2);
 }
 
+TEST(SqliteConnectionTest, ExecuteRejectsEmbeddedNullWithoutExecutingAnySql) {
+    SqliteConnection connection(":memory:");
+    std::string sql = "CREATE TABLE before_null (id INTEGER)";
+    sql.push_back('\0');
+    sql.append("CREATE TABLE after_null (id INTEGER)");
+
+    EXPECT_THROW(
+        connection.execute(std::string_view(sql.data(), sql.size())),
+        std::runtime_error);
+
+    auto tableCount = connection.prepare(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type = 'table' AND name IN ('before_null', 'after_null')");
+    ASSERT_TRUE(tableCount.stepRow());
+    EXPECT_EQ(tableCount.columnInt64(0), 0);
+}
+
+TEST(SqliteConnectionTest, PrepareRejectsSqlWithEmbeddedNull) {
+    SqliteConnection connection(":memory:");
+    std::string sql = "SELECT 1";
+    sql.push_back('\0');
+    sql.append("SELECT 2");
+
+    EXPECT_THROW(
+        static_cast<void>(connection.prepare(std::string_view(sql.data(), sql.size()))),
+        std::runtime_error);
+}
+
 TEST(SqliteStatementTest, BindInt64AndStepRowReadAllRowsUntilDone) {
     SqliteConnection connection(":memory:");
     connection.execute("CREATE TABLE values_table (number INTEGER NOT NULL, label TEXT NOT NULL)");
@@ -127,10 +155,12 @@ TEST(SqliteStatementTest, BindsEmptyTextAsTextRatherThanNull) {
     EXPECT_EQ(statement.columnText(1), "");
 }
 
-TEST(SqliteStatementTest, ExecuteDoneRejectsStatementsThatProduceRows) {
+TEST(SqliteStatementTest, ExecuteDonePermanentlyRejectsStatementsThatProduceRows) {
     SqliteConnection connection(":memory:");
     auto statement = connection.prepare("SELECT 1");
 
+    EXPECT_THROW(statement.executeDone(), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(statement.columnInt64(0)), std::runtime_error);
     EXPECT_THROW(statement.executeDone(), std::runtime_error);
 }
 

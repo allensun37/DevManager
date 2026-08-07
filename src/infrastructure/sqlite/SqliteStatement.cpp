@@ -115,7 +115,8 @@ void SqliteStatement::executeDone() {
         return;
     }
     if (result == SQLITE_ROW) {
-        rowAvailable_ = true;
+        rowAvailable_ = false;
+        finished_ = true;
         throw std::runtime_error(
             "failed to execute SQLite statement: statement produced a row");
     }

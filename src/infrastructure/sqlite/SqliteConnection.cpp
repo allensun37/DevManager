@@ -34,6 +34,13 @@ int checkedSqlLength(std::string_view sql) {
     return static_cast<int>(sql.size());
 }
 
+void rejectEmbeddedNull(std::string_view sql, std::string_view operation) {
+    if (sql.find('\0') != std::string_view::npos) {
+        throw std::runtime_error(
+            std::string(operation) + ": SQL contains an embedded NUL byte");
+    }
+}
+
 }  // namespace
 
 SqliteConnection::SqliteConnection(const std::filesystem::path& path) {
@@ -74,6 +81,7 @@ SqliteConnection::~SqliteConnection() noexcept {
 }
 
 void SqliteConnection::execute(std::string_view sql) {
+    rejectEmbeddedNull(sql, "failed to execute SQLite statement");
     const std::string sqlText(sql);
     char* errorMessage = nullptr;
     const int result = sqlite3_exec(handle_, sqlText.c_str(), nullptr, nullptr, &errorMessage);
@@ -88,6 +96,7 @@ void SqliteConnection::execute(std::string_view sql) {
 }
 
 SqliteStatement SqliteConnection::prepare(std::string_view sql) {
+    rejectEmbeddedNull(sql, "failed to prepare SQLite statement");
     sqlite3_stmt* statement = nullptr;
     const int result = sqlite3_prepare_v2(
         handle_, sql.data(), checkedSqlLength(sql), &statement, nullptr);
