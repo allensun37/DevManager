@@ -252,6 +252,16 @@ TEST(MigrationManagerTest, EmbeddedInitialMigrationCreatesAndSeedsRequiredSchema
             "VALUES ('18446744073709551615', 'Too large', 'too large', '', "
             "'Active', 'active', 'active')"),
         std::runtime_error);
+    EXPECT_THROW(
+        connection.execute(
+            "INSERT INTO projects("
+            "id, name, normalized_name, description, status, normalized_status, status_sort_key) "
+            "VALUES (NULL, 'Null id', 'null id', '', 'Active', 'active', 'active')"),
+        std::runtime_error);
+
+    auto projects = connection.prepare("SELECT COUNT(*) FROM projects");
+    ASSERT_TRUE(projects.stepRow());
+    EXPECT_EQ(projects.columnInt64(0), 0);
 }
 
 }  // namespace

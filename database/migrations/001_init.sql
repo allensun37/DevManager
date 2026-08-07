@@ -4,7 +4,7 @@ CREATE TABLE repository_state(
 );
 
 CREATE TABLE projects(
-    id TEXT PRIMARY KEY CHECK(length(id)=20 AND id NOT GLOB '*[^0-9]*' AND id >= '00000000000000000001' AND id <= '18446744073709551614'),
+    id TEXT NOT NULL PRIMARY KEY CHECK(length(id)=20 AND id NOT GLOB '*[^0-9]*' AND id >= '00000000000000000001' AND id <= '18446744073709551614'),
     name TEXT NOT NULL,
     normalized_name TEXT NOT NULL,
     description TEXT NOT NULL,
