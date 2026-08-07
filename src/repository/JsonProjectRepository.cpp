@@ -1,7 +1,9 @@
 #include "repository/JsonProjectRepository.h"
 
+#include "query/ProjectQueryEvaluator.h"
 #include "repository/FileReplacer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <fstream>
@@ -91,6 +93,69 @@ ProjectStore JsonProjectRepository::loadStore() const {
         throw std::runtime_error("Invalid project data file '" + filePath_.string() +
                                  "': " + error.what());
     }
+}
+
+void JsonProjectRepository::create(const Project& project,
+                                   ProjectId nextIdAfterCreate) {
+    ProjectStore candidate = loadStore();
+    const bool duplicate = std::any_of(candidate.projects.begin(), candidate.projects.end(),
+                                       [&project](const Project& stored) {
+                                           return stored.id() == project.id();
+                                       });
+    if (duplicate) {
+        throw std::runtime_error("Project ID already exists");
+    }
+
+    candidate.projects.push_back(project);
+    candidate.nextId = nextIdAfterCreate;
+    saveStore(candidate);
+}
+
+void JsonProjectRepository::update(const Project& project) {
+    ProjectStore candidate = loadStore();
+    const auto iterator = std::find_if(candidate.projects.begin(), candidate.projects.end(),
+                                       [&project](const Project& stored) {
+                                           return stored.id() == project.id();
+                                       });
+    if (iterator == candidate.projects.end()) {
+        throw std::runtime_error("Project ID does not exist");
+    }
+
+    *iterator = project;
+    saveStore(candidate);
+}
+
+void JsonProjectRepository::remove(ProjectId id) {
+    ProjectStore candidate = loadStore();
+    const auto iterator = std::find_if(candidate.projects.begin(), candidate.projects.end(),
+                                       [id](const Project& project) {
+                                           return project.id() == id;
+                                       });
+    if (iterator == candidate.projects.end()) {
+        throw std::runtime_error("Project ID does not exist");
+    }
+
+    candidate.projects.erase(iterator);
+    saveStore(candidate);
+}
+
+std::optional<Project> JsonProjectRepository::findById(ProjectId id) const {
+    const ProjectStore store = loadStore();
+    const auto iterator = std::find_if(store.projects.begin(), store.projects.end(),
+                                       [id](const Project& project) {
+                                           return project.id() == id;
+                                       });
+    return iterator == store.projects.end()
+               ? std::nullopt
+               : std::optional<Project>{*iterator};
+}
+
+std::vector<Project> JsonProjectRepository::query(const ProjectQuery& projectQuery) const {
+    return ProjectQueryEvaluator::query(loadStore().projects, projectQuery);
+}
+
+std::uint64_t JsonProjectRepository::count(const ProjectQuery& projectQuery) const {
+    return ProjectQueryEvaluator::count(loadStore().projects, projectQuery);
 }
 
 void JsonProjectRepository::saveStore(const ProjectStore& store) const {

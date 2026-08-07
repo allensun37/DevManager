@@ -129,7 +129,10 @@ add_library(DevManagerRepository
 target_include_directories(DevManagerRepository PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(DevManagerRepository PUBLIC DevManagerDomain)
+target_link_libraries(DevManagerRepository PUBLIC
+    DevManagerDomain
+    DevManagerQuery
+)
 
 add_library(DevManagerMenu src/menu/MenuController.cpp)
 target_include_directories(DevManagerMenu PUBLIC

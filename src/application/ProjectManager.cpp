@@ -1,5 +1,6 @@
 #include "application/ProjectManager.h"
 #include "common/ProjectSearchText.h"
+#include "query/ProjectQueryEvaluator.h"
 #include "repository/ProjectRepository.h"
 
 #include <algorithm>
@@ -31,7 +32,8 @@ ProjectId ProjectManager::addProject(std::string name,
                                     std::move(techStack),
                                     std::move(description),
                                     std::move(status));
-    commitCandidate(std::move(candidate));
+    const Project& created = candidate.projects.back();
+    commitCreated(std::move(candidate), created);
     return id;
 }
 
@@ -55,7 +57,8 @@ bool ProjectManager::updateProject(ProjectId id,
                                         std::move(techStack),
                                         std::move(description),
                                         std::move(status)};
-    commitCandidate(std::move(candidate));
+    const Project& updated = candidate.projects[index];
+    commitUpdated(std::move(candidate), updated);
     return true;
 }
 
@@ -71,7 +74,7 @@ bool ProjectManager::deleteProject(ProjectId id) {
     ProjectStore candidate{nextId_, projects_};
     candidate.projects.erase(candidate.projects.begin() +
                              std::distance(projects_.begin(), iterator));
-    commitCandidate(std::move(candidate));
+    commitRemoved(std::move(candidate), id);
     return true;
 }
 
@@ -154,12 +157,44 @@ std::vector<Project> ProjectManager::sortedProjects(ProjectSortKey key) const {
     return sorted;
 }
 
-void ProjectManager::commitCandidate(ProjectStore candidate) {
+std::vector<Project> ProjectManager::queryProjects(const ProjectQuery& projectQuery) const {
     if (repository_ != nullptr) {
-        repository_->saveStore(candidate);
+        return repository_->query(projectQuery);
+    }
+    return ProjectQueryEvaluator::query(projects_, projectQuery);
+}
+
+std::uint64_t ProjectManager::countProjects(const ProjectQuery& projectQuery) const {
+    if (repository_ != nullptr) {
+        return repository_->count(projectQuery);
+    }
+    return ProjectQueryEvaluator::count(projects_, projectQuery);
+}
+
+void ProjectManager::commitCreated(ProjectStore candidate, const Project& created) {
+    if (repository_ != nullptr) {
+        repository_->create(created, candidate.nextId);
     }
 
-    projects_ = std::move(candidate.projects);
+    projects_.swap(candidate.projects);
+    nextId_ = candidate.nextId;
+}
+
+void ProjectManager::commitUpdated(ProjectStore candidate, const Project& updated) {
+    if (repository_ != nullptr) {
+        repository_->update(updated);
+    }
+
+    projects_.swap(candidate.projects);
+    nextId_ = candidate.nextId;
+}
+
+void ProjectManager::commitRemoved(ProjectStore candidate, ProjectId removedId) {
+    if (repository_ != nullptr) {
+        repository_->remove(removedId);
+    }
+
+    projects_.swap(candidate.projects);
     nextId_ = candidate.nextId;
 }
 

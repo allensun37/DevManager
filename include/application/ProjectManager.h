@@ -3,6 +3,7 @@
 #include "domain/Project.h"
 #include "query/ProjectQuery.h"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,9 +34,13 @@ public:
     [[nodiscard]] std::vector<Project> searchByTechnology(std::string_view query) const;
     [[nodiscard]] std::vector<Project> filterByStatus(std::string_view status) const;
     [[nodiscard]] std::vector<Project> sortedProjects(ProjectSortKey key) const;
+    [[nodiscard]] std::vector<Project> queryProjects(const ProjectQuery& projectQuery) const;
+    [[nodiscard]] std::uint64_t countProjects(const ProjectQuery& projectQuery) const;
 
 private:
-    void commitCandidate(ProjectStore candidate);
+    void commitCreated(ProjectStore candidate, const Project& created);
+    void commitUpdated(ProjectStore candidate, const Project& updated);
+    void commitRemoved(ProjectStore candidate, ProjectId removedId);
 
     std::vector<Project> projects_;
     ProjectId nextId_ {1};

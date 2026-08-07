@@ -2,15 +2,18 @@
 #include "application/ProjectService.h"
 #include "http/HttpServer.h"
 #include "http/ProjectHttpController.h"
+#include "query/ProjectQueryEvaluator.h"
 #include "repository/ProjectRepository.h"
 
 #include <gtest/gtest.h>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 #include <stdexcept>
 #include <thread>
@@ -79,6 +82,11 @@ httplib::Result putJson(devmanager::HttpServer& server,
 
 class FakeProjectRepository final : public devmanager::ProjectRepository {
 public:
+    struct CreateCall {
+        devmanager::Project project;
+        devmanager::ProjectId nextIdAfterCreate;
+    };
+
     explicit FakeProjectRepository(devmanager::ProjectStore initialStore = {})
         : store_(std::move(initialStore)) {}
 
@@ -86,26 +94,77 @@ public:
         return store_;
     }
 
-    void saveStore(const devmanager::ProjectStore& candidate) const override {
+    void create(const devmanager::Project& project,
+                devmanager::ProjectId nextIdAfterCreate) override {
+        createCalls_.push_back(CreateCall{project, nextIdAfterCreate});
         if (failSaves_) {
             throw std::runtime_error("injected save failure");
         }
-        store_ = candidate;
-        savedStores_.push_back(candidate);
+        store_.projects.push_back(project);
+        store_.nextId = nextIdAfterCreate;
     }
 
-    void setFailSaves(bool fail) const noexcept {
+    void update(const devmanager::Project& project) override {
+        if (failSaves_) {
+            throw std::runtime_error("injected save failure");
+        }
+        const auto iterator = std::find_if(store_.projects.begin(), store_.projects.end(),
+                                           [&project](const devmanager::Project& stored) {
+                                               return stored.id() == project.id();
+                                           });
+        if (iterator == store_.projects.end()) {
+            throw std::runtime_error("missing project");
+        }
+        *iterator = project;
+    }
+
+    void remove(devmanager::ProjectId id) override {
+        if (failSaves_) {
+            throw std::runtime_error("injected save failure");
+        }
+        const auto iterator = std::find_if(store_.projects.begin(), store_.projects.end(),
+                                           [id](const devmanager::Project& project) {
+                                               return project.id() == id;
+                                           });
+        if (iterator == store_.projects.end()) {
+            throw std::runtime_error("missing project");
+        }
+        store_.projects.erase(iterator);
+    }
+
+    [[nodiscard]] std::optional<devmanager::Project> findById(
+        devmanager::ProjectId id) const override {
+        const auto iterator = std::find_if(store_.projects.begin(), store_.projects.end(),
+                                           [id](const devmanager::Project& project) {
+                                               return project.id() == id;
+                                           });
+        return iterator == store_.projects.end()
+                   ? std::nullopt
+                   : std::optional<devmanager::Project>{*iterator};
+    }
+
+    [[nodiscard]] std::vector<devmanager::Project> query(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::query(store_.projects, projectQuery);
+    }
+
+    [[nodiscard]] std::uint64_t count(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::count(store_.projects, projectQuery);
+    }
+
+    void setFailSaves(bool fail) noexcept {
         failSaves_ = fail;
     }
 
-    [[nodiscard]] const std::vector<devmanager::ProjectStore>& savedStores() const {
-        return savedStores_;
+    [[nodiscard]] const std::vector<CreateCall>& createCalls() const noexcept {
+        return createCalls_;
     }
 
 private:
-    mutable devmanager::ProjectStore store_;
-    mutable std::vector<devmanager::ProjectStore> savedStores_;
-    mutable bool failSaves_ {false};
+    devmanager::ProjectStore store_;
+    std::vector<CreateCall> createCalls_;
+    bool failSaves_ {false};
 };
 
 std::string validProjectJson(const std::string& name = "DevManager") {
@@ -452,7 +511,11 @@ TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack)
     EXPECT_EQ(failureBody.at("error").at("message"), "Persistence operation failed");
     EXPECT_FALSE(failed->get_header_value("X-Request-ID").empty());
     EXPECT_TRUE(manager.listProjects().empty());
-    EXPECT_TRUE(repository.savedStores().empty());
+    ASSERT_EQ(repository.createCalls().size(), 1U);
+    EXPECT_EQ(repository.createCalls().front().project.id(), 1U);
+    EXPECT_EQ(repository.createCalls().front().nextIdAfterCreate, 2U);
+    EXPECT_TRUE(repository.loadStore().projects.empty());
+    EXPECT_EQ(repository.loadStore().nextId, 1U);
 
     repository.setFailSaves(false);
     const auto retry = postJson(server, validProjectJson("Retry"));

@@ -1,9 +1,12 @@
 #include "menu/MenuController.h"
 
+#include "query/ProjectQueryEvaluator.h"
 #include "repository/ProjectRepository.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -17,8 +20,31 @@ public:
         return {};
     }
 
-    void saveStore(const devmanager::ProjectStore&) const override {
+    void create(const devmanager::Project&, devmanager::ProjectId) override {
         throw std::runtime_error("Injected save failure");
+    }
+
+    void update(const devmanager::Project&) override {
+        throw std::runtime_error("Injected save failure");
+    }
+
+    void remove(devmanager::ProjectId) override {
+        throw std::runtime_error("Injected save failure");
+    }
+
+    [[nodiscard]] std::optional<devmanager::Project> findById(
+        devmanager::ProjectId) const override {
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::vector<devmanager::Project> query(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::query({}, projectQuery);
+    }
+
+    [[nodiscard]] std::uint64_t count(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::count({}, projectQuery);
     }
 };
 
@@ -28,14 +54,65 @@ public:
         return store;
     }
 
-    void saveStore(const devmanager::ProjectStore& candidate) const override {
+    void create(const devmanager::Project& project,
+                devmanager::ProjectId nextIdAfterCreate) override {
         if (failWrites) {
             throw std::runtime_error("Injected save failure");
         }
-        store = candidate;
+        store.projects.push_back(project);
+        store.nextId = nextIdAfterCreate;
     }
 
-    mutable devmanager::ProjectStore store;
+    void update(const devmanager::Project& project) override {
+        if (failWrites) {
+            throw std::runtime_error("Injected save failure");
+        }
+        const auto iterator = std::find_if(store.projects.begin(), store.projects.end(),
+                                           [&project](const devmanager::Project& stored) {
+                                               return stored.id() == project.id();
+                                           });
+        if (iterator == store.projects.end()) {
+            throw std::runtime_error("Missing project");
+        }
+        *iterator = project;
+    }
+
+    void remove(devmanager::ProjectId id) override {
+        if (failWrites) {
+            throw std::runtime_error("Injected save failure");
+        }
+        const auto iterator = std::find_if(store.projects.begin(), store.projects.end(),
+                                           [id](const devmanager::Project& project) {
+                                               return project.id() == id;
+                                           });
+        if (iterator == store.projects.end()) {
+            throw std::runtime_error("Missing project");
+        }
+        store.projects.erase(iterator);
+    }
+
+    [[nodiscard]] std::optional<devmanager::Project> findById(
+        devmanager::ProjectId id) const override {
+        const auto iterator = std::find_if(store.projects.begin(), store.projects.end(),
+                                           [id](const devmanager::Project& project) {
+                                               return project.id() == id;
+                                           });
+        return iterator == store.projects.end()
+                   ? std::nullopt
+                   : std::optional<devmanager::Project>{*iterator};
+    }
+
+    [[nodiscard]] std::vector<devmanager::Project> query(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::query(store.projects, projectQuery);
+    }
+
+    [[nodiscard]] std::uint64_t count(
+        const devmanager::ProjectQuery& projectQuery) const override {
+        return devmanager::ProjectQueryEvaluator::count(store.projects, projectQuery);
+    }
+
+    devmanager::ProjectStore store;
     bool failWrites {false};
 };
 
