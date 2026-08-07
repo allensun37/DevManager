@@ -1,0 +1,17 @@
+#pragma once
+
+#include "infrastructure/sqlite/MigrationManager.h"
+
+#include <vector>
+
+namespace devmanager {
+
+inline const std::vector<Migration> kEmbeddedMigrations {
+    Migration {
+        1,
+        "init",
+        R"DMSQL_v1(@DEVMANAGER_INIT_MIGRATION_SQL@)DMSQL_v1",
+    },
+};
+
+}  // namespace devmanager

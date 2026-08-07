@@ -14,6 +14,27 @@ configure_file(
     @ONLY
 )
 
+set(DEVMANAGER_INIT_MIGRATION_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/database/migrations/001_init.sql"
+)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${DEVMANAGER_INIT_MIGRATION_PATH}"
+)
+file(READ "${DEVMANAGER_INIT_MIGRATION_PATH}" DEVMANAGER_INIT_MIGRATION_SQL)
+string(FIND
+    "${DEVMANAGER_INIT_MIGRATION_SQL}"
+    ")DMSQL_v1\""
+    DEVMANAGER_MIGRATION_DELIMITER_COLLISION
+)
+if(NOT DEVMANAGER_MIGRATION_DELIMITER_COLLISION EQUAL -1)
+    message(FATAL_ERROR "001_init.sql conflicts with the embedded migration delimiter")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbeddedMigrations.h.in"
+    "${DEVMANAGER_GENERATED_INCLUDE_DIR}/EmbeddedMigrations.h"
+    @ONLY
+)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -96,12 +117,14 @@ endif()
 add_library(SQLite::SQLite3 ALIAS DevManagerSqliteC)
 
 add_library(DevManagerSqliteInfrastructure
+    src/infrastructure/sqlite/MigrationManager.cpp
     src/infrastructure/sqlite/SqliteConnection.cpp
     src/infrastructure/sqlite/SqliteStatement.cpp
     src/infrastructure/sqlite/SqliteTransaction.cpp
 )
 target_include_directories(DevManagerSqliteInfrastructure PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${DEVMANAGER_GENERATED_INCLUDE_DIR}
 )
 target_link_libraries(DevManagerSqliteInfrastructure PRIVATE SQLite::SQLite3)
 
@@ -328,6 +351,15 @@ target_link_libraries(DevManagerSqliteInfrastructureTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerSqliteInfrastructureTests)
+
+add_executable(DevManagerMigrationTests
+    tests/infrastructure/sqlite/MigrationManagerTests.cpp
+)
+target_link_libraries(DevManagerMigrationTests PRIVATE
+    DevManagerSqliteInfrastructure
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerMigrationTests)
 
 add_executable(DevManagerMenuTests
     tests/menu/MenuControllerTests.cpp
