@@ -5,7 +5,13 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <filesystem>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -13,6 +19,40 @@ namespace {
 using devmanager::Migration;
 using devmanager::MigrationManager;
 using devmanager::SqliteConnection;
+
+class TemporaryDatabaseFile final {
+public:
+    TemporaryDatabaseFile() {
+        static std::atomic_uint64_t counter {0};
+        const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        directory_ = std::filesystem::temp_directory_path() /
+                     ("devmanager-migration-tests-" + std::to_string(timestamp) + "-" +
+                      std::to_string(counter++));
+        std::filesystem::create_directories(directory_);
+        path_ = directory_ / "projects.sqlite3";
+    }
+
+    ~TemporaryDatabaseFile() noexcept {
+        static_cast<void>(cleanup());
+    }
+
+    TemporaryDatabaseFile(const TemporaryDatabaseFile&) = delete;
+    TemporaryDatabaseFile& operator=(const TemporaryDatabaseFile&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+    [[nodiscard]] std::error_code cleanup() noexcept {
+        std::error_code error;
+        std::filesystem::remove_all(directory_, error);
+        return error;
+    }
+
+private:
+    std::filesystem::path directory_;
+    std::filesystem::path path_;
+};
 
 TEST(MigrationManagerTest, AppliesMigrationOnFirstRun) {
     SqliteConnection connection(":memory:");
@@ -31,18 +71,29 @@ TEST(MigrationManagerTest, AppliesMigrationOnFirstRun) {
 }
 
 TEST(MigrationManagerTest, DoesNotApplyTheSameMigrationTwice) {
-    SqliteConnection connection(":memory:");
-    MigrationManager manager(connection);
+    TemporaryDatabaseFile database;
     const std::vector<Migration> migrations {
         Migration {1, "create_items", "CREATE TABLE items(id INTEGER)"},
     };
 
-    manager.migrate(migrations);
-    EXPECT_NO_THROW(manager.migrate(migrations));
+    {
+        SqliteConnection connection(database.path());
+        MigrationManager manager(connection);
+        manager.migrate(migrations);
+    }
 
-    auto applied = connection.prepare("SELECT COUNT(*) FROM schema_migrations");
-    ASSERT_TRUE(applied.stepRow());
-    EXPECT_EQ(applied.columnInt64(0), 1);
+    {
+        SqliteConnection connection(database.path());
+        MigrationManager manager(connection);
+        EXPECT_NO_THROW(manager.migrate(migrations));
+
+        auto applied = connection.prepare("SELECT COUNT(*) FROM schema_migrations");
+        ASSERT_TRUE(applied.stepRow());
+        EXPECT_EQ(applied.columnInt64(0), 1);
+    }
+
+    const auto cleanupError = database.cleanup();
+    EXPECT_FALSE(cleanupError) << cleanupError.message();
 }
 
 TEST(MigrationManagerTest, AppliesUnorderedMigrationsInAscendingVersionOrder) {
@@ -148,6 +199,67 @@ TEST(MigrationManagerTest, RollsBackMetadataAndPartialSchemaWhenFirstMigrationFa
         "WHERE type = 'table' AND name IN ('partial', 'schema_migrations')");
     ASSERT_TRUE(tableCount.stepRow());
     EXPECT_EQ(tableCount.columnInt64(0), 0);
+}
+
+TEST(MigrationManagerTest, RejectsCommitEscapeAndRollsBackAllMigrationState) {
+    SqliteConnection connection(":memory:");
+    MigrationManager manager(connection);
+
+    EXPECT_THROW(
+        manager.migrate({Migration {
+            1,
+            "commit_escape",
+            "CREATE TABLE partial(id INTEGER);"
+            "COMMIT;"
+            "CREATE TABLE escaped(id INTEGER);"
+            "INSERT INTO missing_table(id) VALUES (1);",
+        }}),
+        std::runtime_error);
+
+    auto tableCount = connection.prepare(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type = 'table' "
+        "AND name IN ('partial', 'escaped', 'schema_migrations')");
+    ASSERT_TRUE(tableCount.stepRow());
+    EXPECT_EQ(tableCount.columnInt64(0), 0);
+}
+
+TEST(MigrationManagerTest, RejectsSavepointAndRollbackControlAndClearsAuthorizer) {
+    struct ControlStatementCase {
+        const char* name;
+        const char* sql;
+    };
+    const std::vector<ControlStatementCase> cases {
+        {"savepoint", "SAVEPOINT nested; CREATE TABLE partial(id INTEGER);"},
+        {"rollback",
+         "CREATE TABLE partial(id INTEGER);"
+         "ROLLBACK;"
+         "CREATE TABLE escaped(id INTEGER);"},
+    };
+
+    for (const auto& testCase : cases) {
+        SCOPED_TRACE(testCase.name);
+        SqliteConnection connection(":memory:");
+        MigrationManager manager(connection);
+
+        EXPECT_THROW(
+            manager.migrate({Migration {1, testCase.name, testCase.sql}}),
+            std::runtime_error);
+
+        auto tableCount = connection.prepare(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type = 'table' "
+            "AND name IN ('partial', 'escaped', 'schema_migrations')");
+        ASSERT_TRUE(tableCount.stepRow());
+        EXPECT_EQ(tableCount.columnInt64(0), 0);
+
+        EXPECT_NO_THROW(manager.migrate(
+            {Migration {1, "safe_after_rejection", "CREATE TABLE safe(id INTEGER)"}}));
+        auto safeTable = connection.prepare(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'safe'");
+        ASSERT_TRUE(safeTable.stepRow());
+        EXPECT_EQ(safeTable.columnInt64(0), 1);
+    }
 }
 
 TEST(MigrationManagerTest, StopsAfterFailureAndKeepsEarlierCommittedMigration) {
@@ -262,6 +374,83 @@ TEST(MigrationManagerTest, EmbeddedInitialMigrationCreatesAndSeedsRequiredSchema
     auto projects = connection.prepare("SELECT COUNT(*) FROM projects");
     ASSERT_TRUE(projects.stepRow());
     EXPECT_EQ(projects.columnInt64(0), 0);
+}
+
+TEST(MigrationManagerTest, EmbeddedSchemaRejectsProjectIdsWithEmbeddedNull) {
+    SqliteConnection connection(":memory:");
+    MigrationManager manager(connection);
+    manager.migrate(devmanager::kEmbeddedMigrations);
+
+    const std::string canonicalId = "00000000000000000001";
+    auto insertProject = [&connection](std::string_view id) {
+        auto insert = connection.prepare(
+            "INSERT INTO projects("
+            "id, name, normalized_name, description, status, normalized_status, status_sort_key) "
+            "VALUES (?1, 'Name', 'name', '', 'Active', 'active', 'active')");
+        insert.bindText(1, id);
+        insert.executeDone();
+    };
+
+    insertProject(canonicalId);
+    std::string embeddedNullId = canonicalId;
+    embeddedNullId.push_back('\0');
+    embeddedNullId.append("shadow");
+    EXPECT_THROW(insertProject(embeddedNullId), std::runtime_error);
+
+    auto projects = connection.prepare(
+        "SELECT id, length(CAST(id AS BLOB)), instr(id, char(0)) FROM projects");
+    ASSERT_TRUE(projects.stepRow());
+    EXPECT_EQ(projects.columnText(0), canonicalId);
+    EXPECT_EQ(projects.columnInt64(1), 20);
+    EXPECT_EQ(projects.columnInt64(2), 0);
+    EXPECT_FALSE(projects.stepRow());
+}
+
+TEST(MigrationManagerTest, EmbeddedSchemaRejectsNextIdWithEmbeddedNull) {
+    SqliteConnection connection(":memory:");
+    MigrationManager manager(connection);
+    manager.migrate(devmanager::kEmbeddedMigrations);
+
+    std::string embeddedNullNextId = "00000000000000000001";
+    embeddedNullNextId.push_back('\0');
+    embeddedNullNextId.append("shadow");
+    auto update = connection.prepare(
+        "UPDATE repository_state SET next_id = ?1 WHERE singleton = 1");
+    update.bindText(1, embeddedNullNextId);
+    EXPECT_THROW(update.executeDone(), std::runtime_error);
+
+    auto state = connection.prepare(
+        "SELECT next_id, length(CAST(next_id AS BLOB)), instr(next_id, char(0)) "
+        "FROM repository_state WHERE singleton = 1");
+    ASSERT_TRUE(state.stepRow());
+    EXPECT_EQ(state.columnText(0), "00000000000000000001");
+    EXPECT_EQ(state.columnInt64(1), 20);
+    EXPECT_EQ(state.columnInt64(2), 0);
+}
+
+TEST(MigrationManagerTest, EmbeddedSchemaRejectsNonIntegerTagPositions) {
+    SqliteConnection connection(":memory:");
+    MigrationManager manager(connection);
+    manager.migrate(devmanager::kEmbeddedMigrations);
+    connection.execute(
+        "INSERT INTO projects("
+        "id, name, normalized_name, description, status, normalized_status, status_sort_key) "
+        "VALUES ('00000000000000000001', 'Name', 'name', '', 'Active', 'active', 'active')");
+
+    EXPECT_THROW(
+        connection.execute(
+            "INSERT INTO project_tags(project_id, position, tag, normalized_tag) "
+            "VALUES ('00000000000000000001', 0.5, 'Half', 'half')"),
+        std::runtime_error);
+    EXPECT_THROW(
+        connection.execute(
+            "INSERT INTO project_tags(project_id, position, tag, normalized_tag) "
+            "VALUES ('00000000000000000001', '1.5', 'Text half', 'text half')"),
+        std::runtime_error);
+
+    auto tags = connection.prepare("SELECT COUNT(*) FROM project_tags");
+    ASSERT_TRUE(tags.stepRow());
+    EXPECT_EQ(tags.columnInt64(0), 0);
 }
 
 }  // namespace

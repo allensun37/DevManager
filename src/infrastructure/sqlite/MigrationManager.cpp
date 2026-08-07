@@ -4,6 +4,8 @@
 #include "infrastructure/sqlite/SqliteStatement.h"
 #include "infrastructure/sqlite/SqliteTransaction.h"
 
+#include <sqlite3.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <set>
@@ -11,6 +13,45 @@
 
 namespace devmanager {
 namespace {
+
+int denyMigrationTransactionControl(
+    void*,
+    int actionCode,
+    const char*,
+    const char*,
+    const char*,
+    const char*) noexcept {
+    if (actionCode == SQLITE_TRANSACTION || actionCode == SQLITE_SAVEPOINT) {
+        return SQLITE_DENY;
+    }
+    return SQLITE_OK;
+}
+
+class MigrationAuthorizerGuard final {
+public:
+    explicit MigrationAuthorizerGuard(sqlite3* connection)
+        : connection_(connection) {
+        const int result = sqlite3_set_authorizer(
+            connection_, denyMigrationTransactionControl, nullptr);
+        if (result != SQLITE_OK) {
+            throw std::runtime_error(
+                "failed to install SQLite migration authorizer: " +
+                std::string(sqlite3_errmsg(connection_)));
+        }
+    }
+
+    ~MigrationAuthorizerGuard() noexcept {
+        if (connection_ != nullptr) {
+            static_cast<void>(sqlite3_set_authorizer(connection_, nullptr, nullptr));
+        }
+    }
+
+    MigrationAuthorizerGuard(const MigrationAuthorizerGuard&) = delete;
+    MigrationAuthorizerGuard& operator=(const MigrationAuthorizerGuard&) = delete;
+
+private:
+    sqlite3* connection_;
+};
 
 bool migrationTableExists(SqliteConnection& connection) {
     auto statement = connection.prepare(
@@ -79,7 +120,10 @@ void MigrationManager::migrate(const std::vector<Migration>& migrations) {
             "version INTEGER PRIMARY KEY,"
             "name TEXT NOT NULL,"
             "applied_at TEXT NOT NULL)");
-        connection_.execute(migration.sql);
+        {
+            MigrationAuthorizerGuard authorizer(connection_.nativeHandle());
+            connection_.execute(migration.sql);
+        }
 
         auto insert = connection_.prepare(
             "INSERT INTO schema_migrations(version, name, applied_at) "
