@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(DevManager VERSION 0.4.0 LANGUAGES CXX)
+project(DevManager VERSION 0.4.0 LANGUAGES C CXX)
 
 set(DEVMANAGER_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${DEVMANAGER_GENERATED_INCLUDE_DIR}")
@@ -69,6 +69,22 @@ set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(spdlog)
 
+FetchContent_Declare(
+    sqlite_amalgamation
+    URL https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip
+    URL_HASH SHA3_256=628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(sqlite_amalgamation)
+
+add_library(DevManagerSqliteC STATIC
+    ${sqlite_amalgamation_SOURCE_DIR}/sqlite3.c
+)
+target_include_directories(DevManagerSqliteC PUBLIC
+    ${sqlite_amalgamation_SOURCE_DIR}
+)
+add_library(SQLite::SQLite3 ALIAS DevManagerSqliteC)
+
 add_library(DevManagerCommon
     src/common/AsciiText.cpp
     src/common/ProjectIdParser.cpp
@@ -126,6 +142,7 @@ add_library(DevManagerRepository
     src/repository/FileReplacer.cpp
     src/repository/JsonProjectRepository.cpp
     src/repository/ProjectStoreValidator.cpp
+    src/repository/SqliteProjectIdCodec.cpp
 )
 target_include_directories(DevManagerRepository PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -269,6 +286,15 @@ target_link_libraries(DevManagerJsonProjectRepositoryTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerJsonProjectRepositoryTests)
+
+add_executable(DevManagerSqliteProjectIdCodecTests
+    tests/repository/SqliteProjectIdCodecTests.cpp
+)
+target_link_libraries(DevManagerSqliteProjectIdCodecTests PRIVATE
+    DevManagerRepository
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerSqliteProjectIdCodecTests)
 
 add_executable(DevManagerMenuTests
     tests/menu/MenuControllerTests.cpp
