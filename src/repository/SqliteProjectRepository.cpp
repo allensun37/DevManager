@@ -109,15 +109,24 @@ void insertTags(SqliteConnection& connection, const Project& project) {
     }
 }
 
+std::int64_t readTagPosition(const SqliteStatement& statement,
+                             int positionColumn,
+                             int storageClassColumn) {
+    if (statement.columnText(storageClassColumn) != "integer") {
+        throw std::runtime_error("invalid SQLite project tag position storage class");
+    }
+    return statement.columnInt64(positionColumn);
+}
+
 std::vector<std::string> loadTags(SqliteConnection& connection, ProjectId id) {
     auto statement = connection.prepare(
-        "SELECT position,tag FROM project_tags "
+        "SELECT position,tag,typeof(position) FROM project_tags "
         "WHERE project_id = ?1 ORDER BY position ASC");
     statement.bindText(1, SqliteProjectIdCodec::encode(id));
 
     std::vector<std::string> tags;
     while (statement.stepRow()) {
-        const std::int64_t position = statement.columnInt64(0);
+        const std::int64_t position = readTagPosition(statement, 0, 2);
         if (position < 0 || static_cast<std::uint64_t>(position) != tags.size()) {
             throw std::runtime_error("invalid SQLite project tag positions");
         }
@@ -143,13 +152,16 @@ ProjectStore loadStoreImpl(SqliteConnection& connection) {
         ProjectStore store;
         {
             auto state = connection.prepare(
-                "SELECT next_id FROM repository_state WHERE singleton = 1");
+                "SELECT singleton,next_id FROM repository_state");
             if (!state.stepRow()) {
                 throw std::runtime_error("repository_state singleton is missing");
             }
-            store.nextId = SqliteProjectIdCodec::decode(state.columnText(0));
+            if (state.columnInt64(0) != 1) {
+                throw std::runtime_error("repository_state singleton is invalid");
+            }
+            store.nextId = SqliteProjectIdCodec::decode(state.columnText(1));
             if (state.stepRow()) {
-                throw std::runtime_error("repository_state contains duplicate singleton rows");
+                throw std::runtime_error("repository_state must contain exactly one row");
             }
         }
 
@@ -176,7 +188,7 @@ ProjectStore loadStoreImpl(SqliteConnection& connection) {
 
         {
             auto tags = connection.prepare(
-                "SELECT project_id,position,tag FROM project_tags "
+                "SELECT project_id,position,tag,typeof(position) FROM project_tags "
                 "ORDER BY project_id ASC,position ASC");
             while (tags.stepRow()) {
                 const ProjectId projectId = SqliteProjectIdCodec::decode(tags.columnText(0));
@@ -186,7 +198,7 @@ ProjectStore loadStoreImpl(SqliteConnection& connection) {
                 }
 
                 StoredProject& project = storedProjects[projectIndex->second];
-                const std::int64_t position = tags.columnInt64(1);
+                const std::int64_t position = readTagPosition(tags, 1, 3);
                 if (position < 0 ||
                     static_cast<std::uint64_t>(position) != project.tags.size()) {
                     throw std::runtime_error("invalid SQLite project tag positions");

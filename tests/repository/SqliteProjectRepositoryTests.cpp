@@ -146,6 +146,28 @@ void insertRawTag(SqliteConnection& connection,
     statement.executeDone();
 }
 
+enum class MalformedTagPositionStorageClass {
+    Text,
+    Real,
+};
+
+void replaceTagsWithMalformedPosition(SqliteConnection& connection,
+                                      ProjectId projectId,
+                                      MalformedTagPositionStorageClass storageClass) {
+    connection.execute("DROP TABLE project_tags");
+    connection.execute(
+        "CREATE TABLE project_tags("
+        "project_id TEXT NOT NULL,position,tag TEXT NOT NULL,normalized_tag TEXT NOT NULL)");
+    auto insert = connection.prepare(
+        storageClass == MalformedTagPositionStorageClass::Text
+            ? "INSERT INTO project_tags(project_id,position,tag,normalized_tag) "
+              "VALUES (?1,'not-an-integer','C++','cpp')"
+            : "INSERT INTO project_tags(project_id,position,tag,normalized_tag) "
+              "VALUES (?1,0.5,'C++','cpp')");
+    insert.bindText(1, SqliteProjectIdCodec::encode(projectId));
+    insert.executeDone();
+}
+
 class StatementPause final {
 public:
     StatementPause(SqliteConnection& connection, std::string sqlFragment)
@@ -417,6 +439,17 @@ TEST_F(SqliteProjectRepositoryTest, MissingRepositoryStateSingletonMakesLoadFail
     EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
 }
 
+TEST_F(SqliteProjectRepositoryTest, ExtraRepositoryStateRowMakesLoadFail) {
+    rawConnection_->execute("PRAGMA ignore_check_constraints = ON");
+    rawConnection_->execute(
+        "INSERT INTO repository_state(singleton,next_id) "
+        "VALUES (2,'00000000000000000002')");
+    rawConnection_->execute("PRAGMA ignore_check_constraints = OFF");
+    ASSERT_EQ(scalarInt(*rawConnection_, "SELECT COUNT(*) FROM repository_state"), 2);
+
+    EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
+}
+
 TEST_F(SqliteProjectRepositoryTest, MalformedPersistedProjectIdMakesLoadFail) {
     rawConnection_->execute("PRAGMA ignore_check_constraints = ON");
     insertRawProject(*rawConnection_, "malformed-id");
@@ -440,6 +473,38 @@ TEST_F(SqliteProjectRepositoryTest, SemanticallyInvalidSnapshotMakesLoadFail) {
     insertRawTag(*rawConnection_, encodedId, 0, "C++");
 
     EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
+}
+
+TEST_F(SqliteProjectRepositoryTest, LoadStoreRejectsTextAndRealTagPositions) {
+    repository_->create(makeProject(1), 2);
+
+    for (const MalformedTagPositionStorageClass storageClass : {
+             MalformedTagPositionStorageClass::Text,
+             MalformedTagPositionStorageClass::Real,
+         }) {
+        SCOPED_TRACE(storageClass == MalformedTagPositionStorageClass::Text ? "TEXT" : "REAL");
+        replaceTagsWithMalformedPosition(*rawConnection_, 1, storageClass);
+        ASSERT_EQ(scalarText(*rawConnection_, "SELECT typeof(position) FROM project_tags"),
+                  storageClass == MalformedTagPositionStorageClass::Text ? "text" : "real");
+
+        EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
+    }
+}
+
+TEST_F(SqliteProjectRepositoryTest, FindByIdRejectsTextAndRealTagPositions) {
+    repository_->create(makeProject(1), 2);
+
+    for (const MalformedTagPositionStorageClass storageClass : {
+             MalformedTagPositionStorageClass::Text,
+             MalformedTagPositionStorageClass::Real,
+         }) {
+        SCOPED_TRACE(storageClass == MalformedTagPositionStorageClass::Text ? "TEXT" : "REAL");
+        replaceTagsWithMalformedPosition(*rawConnection_, 1, storageClass);
+        ASSERT_EQ(scalarText(*rawConnection_, "SELECT typeof(position) FROM project_tags"),
+                  storageClass == MalformedTagPositionStorageClass::Text ? "text" : "real");
+
+        EXPECT_THROW(static_cast<void>(repository_->findById(1)), std::runtime_error);
+    }
 }
 
 TEST_F(SqliteProjectRepositoryTest, LoadStoreUsesOneSnapshotAcrossStateAndProjects) {
@@ -490,7 +555,7 @@ TEST_F(SqliteProjectRepositoryTest, LoadStoreUsesOneSnapshotAcrossProjectsAndTag
     devmanager::MigrationManager(*writerConnection).migrate(devmanager::kEmbeddedMigrations);
     SqliteProjectRepository writer(std::move(writerConnection));
     StatementPause pause(*rawConnection_,
-                         "SELECT project_id,position,tag FROM project_tags");
+                         "SELECT project_id,position,tag");
     std::optional<ProjectStore> readerStore;
     std::exception_ptr readerError;
     std::thread reader([this, &readerStore, &readerError] {
