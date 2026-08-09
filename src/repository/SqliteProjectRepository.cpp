@@ -517,7 +517,6 @@ std::vector<Project> SqliteProjectRepository::query(const ProjectQuery& projectQ
 std::uint64_t SqliteProjectRepository::count(const ProjectQuery& projectQuery) const {
     try {
         SqliteReadTransaction transaction(*connection_);
-        static_cast<void>(sortSql(projectQuery.sort));
         const QueryFilter filter = buildQueryFilter(projectQuery);
         std::string sql = "SELECT COUNT(*) FROM projects p";
         if (!filter.where.empty()) {

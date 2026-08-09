@@ -865,4 +865,18 @@ TEST_F(SqliteProjectRepositoryTest, QueryAndCountReadMalformedSelectedTagPositio
     EXPECT_THROW(static_cast<void>(repository_->query({})), std::runtime_error);
 }
 
+TEST_F(SqliteProjectRepositoryTest, CountIgnoresInvalidSortAndPaginationFields) {
+    repository_->create(makeProject(1, "Alpha", {"C++"}, "", "Active"), 2);
+    repository_->create(makeProject(2, "Beta", {"Rust"}, "", "Paused"), 3);
+
+    ProjectQuery query;
+    query.name = "a";
+    query.sort = static_cast<ProjectSortKey>(999);
+    query.offset = std::numeric_limits<std::uint64_t>::max();
+    query.limit = std::numeric_limits<std::uint64_t>::max();
+
+    EXPECT_EQ(repository_->count(query), 2U);
+    EXPECT_THROW(static_cast<void>(repository_->query(query)), std::runtime_error);
+}
+
 }  // namespace
