@@ -4,8 +4,9 @@
 #include "application/ProjectManager.h"
 #include "application/ProjectService.h"
 #include "infrastructure/logging/Logger.h"
-#include "repository/JsonProjectRepository.h"
+#include "repository/ProjectRepository.h"
 
+#include <memory>
 #include <utility>
 
 namespace devmanager {
@@ -16,14 +17,14 @@ public:
 
     [[nodiscard]] const Config& config() const noexcept;
     [[nodiscard]] Logger& logger() noexcept;
-    [[nodiscard]] JsonProjectRepository& repository() noexcept;
+    [[nodiscard]] ProjectRepository& repository() noexcept;
     [[nodiscard]] ProjectManager& manager() noexcept;
     [[nodiscard]] ProjectService& service() noexcept;
 
 private:
     Config config_;
     Logger logger_;
-    JsonProjectRepository repository_;
+    std::unique_ptr<ProjectRepository> repository_;
     ProjectManager manager_;
     ProjectService service_;
 };

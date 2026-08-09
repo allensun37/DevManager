@@ -208,6 +208,12 @@ target_link_libraries(DevManagerSqliteRepository PUBLIC
     DevManagerSqliteInfrastructure
 )
 
+# ApplicationBootstrap owns the backend selected by RepositoryFactory, so the
+# application library must carry the SQLite repository implementation transitively.
+target_link_libraries(DevManagerApplication PUBLIC
+    DevManagerSqliteRepository
+)
+
 add_library(DevManagerMenu src/menu/MenuController.cpp)
 target_include_directories(DevManagerMenu PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

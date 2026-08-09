@@ -1,6 +1,9 @@
 #include "application/ApplicationBootstrap.h"
 
 #include "repository/JsonProjectRepository.h"
+#include "repository/ProjectRepository.h"
+#include "infrastructure/sqlite/SqliteConnection.h"
+#include "infrastructure/sqlite/SqliteStatement.h"
 
 #include <gtest/gtest.h>
 
@@ -8,8 +11,14 @@
 #include <chrono>
 #include <filesystem>
 #include <system_error>
+#include <type_traits>
+#include <utility>
 
 namespace {
+
+static_assert(std::is_same_v<
+              decltype(std::declval<devmanager::ApplicationBootstrap&>().repository()),
+              devmanager::ProjectRepository&>);
 
 std::filesystem::path makeUniqueTestDirectory() {
     static std::atomic_uint64_t counter{0};
@@ -88,6 +97,55 @@ TEST_F(ApplicationBootstrapTest, OwnsAServiceOverTheSameManager) {
     EXPECT_EQ(project.id(), 1U);
     ASSERT_EQ(bootstrap.manager().listProjects().size(), 1U);
     EXPECT_EQ(bootstrap.service().listProjects().front().id(), project.id());
+}
+
+TEST_F(ApplicationBootstrapTest, JsonRepositoryPersistsProjectsAndNextIdAcrossBootstrapLifetimes) {
+    auto bootstrapConfig = config();
+    bootstrapConfig.storage.type = devmanager::StorageType::Json;
+
+    {
+        devmanager::ApplicationBootstrap bootstrap(bootstrapConfig);
+        EXPECT_EQ(bootstrap.repository().loadStore().nextId, 1U);
+        EXPECT_EQ(bootstrap.manager().addProject("JSON project", {"C++"}, "", "active"),
+                  1U);
+    }
+
+    {
+        devmanager::ApplicationBootstrap bootstrap(bootstrapConfig);
+        ASSERT_EQ(bootstrap.manager().listProjects().size(), 1U);
+        EXPECT_EQ(bootstrap.manager().listProjects().front().name(), "JSON project");
+        EXPECT_EQ(bootstrap.manager().addProject("JSON second", {"SQLite"}, "", "active"),
+                  2U);
+    }
+}
+
+TEST_F(ApplicationBootstrapTest, SqliteRepositoryMigratesAndPersistsProjectsAndNextIdAcrossBootstrapLifetimes) {
+    auto bootstrapConfig = config();
+    bootstrapConfig.storage.type = devmanager::StorageType::Sqlite;
+    bootstrapConfig.storage.path = directory / "projects.db";
+
+    {
+        devmanager::ApplicationBootstrap bootstrap(bootstrapConfig);
+        EXPECT_EQ(bootstrap.manager().addProject("SQLite project", {"C++"}, "", "active"),
+                  1U);
+    }
+
+    ASSERT_TRUE(std::filesystem::exists(bootstrapConfig.storage.path));
+    {
+        devmanager::SqliteConnection connection(bootstrapConfig.storage.path);
+        auto migrationTable = connection.prepare(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'");
+        ASSERT_TRUE(migrationTable.stepRow());
+        EXPECT_EQ(migrationTable.columnInt64(0), 1);
+    }
+
+    {
+        devmanager::ApplicationBootstrap bootstrap(bootstrapConfig);
+        ASSERT_EQ(bootstrap.manager().listProjects().size(), 1U);
+        EXPECT_EQ(bootstrap.manager().listProjects().front().name(), "SQLite project");
+        EXPECT_EQ(bootstrap.manager().addProject("SQLite second", {"JSON"}, "", "active"),
+                  2U);
+    }
 }
 
 }  // namespace
