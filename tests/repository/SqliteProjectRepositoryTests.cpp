@@ -99,6 +99,15 @@ void expectStoresEqual(const ProjectStore& actual, const ProjectStore& expected)
     }
 }
 
+std::vector<ProjectId> projectIds(const std::vector<Project>& projects) {
+    std::vector<ProjectId> ids;
+    ids.reserve(projects.size());
+    for (const Project& project : projects) {
+        ids.push_back(project.id());
+    }
+    return ids;
+}
+
 std::int64_t scalarInt(SqliteConnection& connection, std::string_view sql) {
     auto statement = connection.prepare(sql);
     if (!statement.stepRow()) {
@@ -233,6 +242,52 @@ private:
     std::condition_variable condition_;
     bool paused_ {false};
     bool released_ {false};
+};
+
+class SqliteTraceCapture final {
+public:
+    explicit SqliteTraceCapture(SqliteConnection& connection)
+        : handle_(connection.nativeHandle()) {
+        const int result = sqlite3_trace_v2(handle_, SQLITE_TRACE_STMT,
+                                            &SqliteTraceCapture::trace, this);
+        if (result != SQLITE_OK) {
+            throw std::runtime_error("failed to install SQLite statement trace");
+        }
+    }
+
+    ~SqliteTraceCapture() noexcept {
+        static_cast<void>(sqlite3_trace_v2(handle_, 0, nullptr, nullptr));
+    }
+
+    SqliteTraceCapture(const SqliteTraceCapture&) = delete;
+    SqliteTraceCapture& operator=(const SqliteTraceCapture&) = delete;
+
+    [[nodiscard]] std::vector<std::string> statements() const {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        return statements_;
+    }
+
+private:
+    static int trace(unsigned int traceType,
+                     void* context,
+                     void* statement,
+                     void*) noexcept {
+        if (traceType != SQLITE_TRACE_STMT) {
+            return 0;
+        }
+        const char* sql = sqlite3_sql(static_cast<sqlite3_stmt*>(statement));
+        if (sql == nullptr) {
+            return 0;
+        }
+        auto& capture = *static_cast<SqliteTraceCapture*>(context);
+        const std::lock_guard<std::mutex> lock(capture.mutex_);
+        capture.statements_.emplace_back(sql);
+        return 0;
+    }
+
+    sqlite3* handle_;
+    mutable std::mutex mutex_;
+    std::vector<std::string> statements_;
 };
 
 class SqliteProjectRepositoryTest : public ::testing::Test {
@@ -707,6 +762,107 @@ TEST_F(SqliteProjectRepositoryTest, QueryAndCountDelegateToExistingEvaluatorSema
     ASSERT_EQ(result.size(), 1U);
     EXPECT_EQ(result.front().id(), 2U);
     EXPECT_EQ(repository_->count(query), 2U);
+}
+
+TEST_F(SqliteProjectRepositoryTest, QueryRejectsWindowValuesThatDoNotFitSQLiteInteger) {
+    ProjectQuery query;
+    query.offset = std::numeric_limits<std::uint64_t>::max();
+    query.limit = 1;
+
+    EXPECT_THROW(static_cast<void>(repository_->query(query)), std::runtime_error);
+
+    query.offset = 0;
+    query.limit = std::numeric_limits<std::uint64_t>::max();
+    EXPECT_THROW(static_cast<void>(repository_->query(query)), std::runtime_error);
+}
+
+TEST_F(SqliteProjectRepositoryTest, QueryFiltersUseNormalizedNameStatusAndTechnologySemantics) {
+    repository_->create(makeProject(1, "Alpha C++ Builder", {"C++ / CMake", "Rust"}, "", " Active "), 2);
+    repository_->create(makeProject(2, "alphabet", {"Rust"}, "", "Paused"), 3);
+    repository_->create(makeProject(3, "Beta", {"C++"}, "", "ACTIVE"), 4);
+    repository_->create(makeProject(4, "C punctuation", {"C---"}, "", "Active"), 5);
+
+    ProjectQuery query;
+    query.name = "ALP";
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{1, 2}));
+
+    query = {};
+    query.status = " active ";
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{1, 3, 4}));
+
+    query = {};
+    query.technology = "C++";
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{1, 3}));
+
+    query = {};
+    query.name = "";
+    EXPECT_TRUE(repository_->query(query).empty());
+    query = {};
+    query.status = "   ";
+    EXPECT_TRUE(repository_->query(query).empty());
+    query = {};
+    query.technology = "!!!";
+    EXPECT_TRUE(repository_->query(query).empty());
+    query = {};
+    EXPECT_EQ(repository_->count(query), 4U);
+}
+
+TEST_F(SqliteProjectRepositoryTest, QuerySortsEveryKeyWithIdTieBreakAndAppliesWindow) {
+    repository_->create(makeProject(1, "Zulu", {"C"}, "", "Paused"), 2);
+    repository_->create(makeProject(2, "Alpha", {"Rust"}, "", "Active"), 3);
+    repository_->create(makeProject(3, "alpha", {"Go"}, "", "Active"), 4);
+
+    ProjectQuery query;
+    query.sort = ProjectSortKey::Id;
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{1, 2, 3}));
+    query.sort = ProjectSortKey::Name;
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{2, 3, 1}));
+    query.sort = ProjectSortKey::Status;
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{2, 3, 1}));
+
+    query.sort = ProjectSortKey::Id;
+    query.offset = 1;
+    query.limit = 1;
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{2}));
+    query.offset = 99;
+    EXPECT_TRUE(repository_->query(query).empty());
+    query.offset = 99;
+    query.limit = 0;
+    EXPECT_EQ(projectIds(repository_->query(query)), (std::vector<ProjectId>{1, 2, 3}));
+
+    query.name = "a";
+    EXPECT_EQ(repository_->count(query), 2U);
+}
+
+TEST_F(SqliteProjectRepositoryTest, QueryLoadsSelectedTagsInOneOrderedBatch) {
+    repository_->create(makeProject(1, "One", {"C++", "Rust", "C++"}), 2);
+    repository_->create(makeProject(2, "Two", {"Go", "Go"}), 3);
+
+    SqliteTraceCapture trace(*rawConnection_);
+    ProjectQuery query;
+    const std::vector<Project> result = repository_->query(query);
+    const std::vector<std::string> statements = trace.statements();
+
+    ASSERT_EQ(result.size(), 2U);
+    EXPECT_EQ(result[0].techStack(), (std::vector<std::string>{"C++", "Rust", "C++"}));
+    EXPECT_EQ(result[1].techStack(), (std::vector<std::string>{"Go", "Go"}));
+
+    std::size_t tagSelectCount = 0;
+    for (const std::string& sql : statements) {
+        if (sql.find("SELECT project_id,position,tag,typeof(position) FROM project_tags WHERE project_id IN") !=
+            std::string::npos) {
+            ++tagSelectCount;
+        }
+        EXPECT_EQ(sql.find("SELECT id,name,description,status FROM projects ORDER BY id ASC"),
+                  std::string::npos);
+    }
+    EXPECT_EQ(tagSelectCount, 1U);
+}
+
+TEST_F(SqliteProjectRepositoryTest, QueryAndCountReadMalformedSelectedTagPositionsStrictly) {
+    repository_->create(makeProject(1), 2);
+    replaceTagsWithMalformedPosition(*rawConnection_, 1, MalformedTagPositionStorageClass::Text);
+    EXPECT_THROW(static_cast<void>(repository_->query({})), std::runtime_error);
 }
 
 }  // namespace

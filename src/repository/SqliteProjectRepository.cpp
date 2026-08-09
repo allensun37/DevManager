@@ -4,7 +4,6 @@
 #include "infrastructure/sqlite/SqliteConnection.h"
 #include "infrastructure/sqlite/SqliteStatement.h"
 #include "infrastructure/sqlite/SqliteTransaction.h"
-#include "query/ProjectQueryEvaluator.h"
 #include "repository/ProjectStoreValidator.h"
 #include "repository/SqliteProjectIdCodec.h"
 
@@ -13,6 +12,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -233,6 +233,161 @@ ProjectStore loadStoreImpl(SqliteConnection& connection) {
     }
 }
 
+struct QueryFilter final {
+    std::string where;
+    std::vector<std::string> bindings;
+};
+
+QueryFilter buildQueryFilter(const ProjectQuery& projectQuery) {
+    QueryFilter filter;
+    if (projectQuery.name.has_value()) {
+        const std::string normalized =
+            project_search_text::normalizeName(*projectQuery.name);
+        if (normalized.empty()) {
+            filter.where = "0";
+        } else {
+            filter.where = "instr(p.normalized_name, ?) > 0";
+            filter.bindings.push_back(normalized);
+        }
+    }
+    if (projectQuery.status.has_value()) {
+        const std::string normalized =
+            project_search_text::normalizeStatus(*projectQuery.status);
+        if (normalized.empty()) {
+            filter.where = filter.where.empty() ? "0" : filter.where + " AND 0";
+        } else {
+            const std::string condition = "p.normalized_status = ?";
+            filter.where = filter.where.empty() ? condition : filter.where + " AND " + condition;
+            filter.bindings.push_back(normalized);
+        }
+    }
+    if (projectQuery.technology.has_value()) {
+        const std::string normalized =
+            project_search_text::normalizeTechnology(*projectQuery.technology);
+        if (normalized.empty()) {
+            filter.where = filter.where.empty() ? "0" : filter.where + " AND 0";
+        } else {
+            const std::string condition =
+                "EXISTS (SELECT 1 FROM project_tags filter_tag WHERE "
+                "filter_tag.project_id = p.id AND instr(filter_tag.normalized_tag, ?) > 0)";
+            filter.where = filter.where.empty() ? condition : filter.where + " AND " + condition;
+            filter.bindings.push_back(normalized);
+        }
+    }
+    return filter;
+}
+
+std::string sortSql(ProjectSortKey sort) {
+    switch (sort) {
+    case ProjectSortKey::Id:
+        return "p.id ASC";
+    case ProjectSortKey::Name:
+        return "p.normalized_name ASC, p.id ASC";
+    case ProjectSortKey::Status:
+        return "p.status_sort_key ASC, p.id ASC";
+    }
+    throw std::runtime_error("failed to query SQLite projects: unsupported project sort key");
+}
+
+void bindFilter(SqliteStatement& statement, const QueryFilter& filter) {
+    int index = 1;
+    for (const std::string& binding : filter.bindings) {
+        statement.bindText(index++, binding);
+    }
+}
+
+std::vector<Project> readQueriedProjects(SqliteConnection& connection,
+                                         const ProjectQuery& projectQuery,
+                                         const QueryFilter& filter) {
+    std::string sql =
+        "SELECT p.id,p.name,p.description,p.status FROM projects p";
+    if (!filter.where.empty()) {
+        sql += " WHERE " + filter.where;
+    }
+    sql += " ORDER BY " + sortSql(projectQuery.sort);
+
+    const bool paged = projectQuery.limit != 0;
+    if (paged) {
+        constexpr std::uint64_t maxInt64 =
+            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        if (projectQuery.offset > maxInt64 || projectQuery.limit > maxInt64) {
+            throw std::runtime_error(
+                "failed to query SQLite projects: offset/limit exceeds SQLite integer range");
+        }
+        sql += " LIMIT ? OFFSET ?";
+    }
+
+    auto projects = connection.prepare(sql);
+    bindFilter(projects, filter);
+    int nextBinding = static_cast<int>(filter.bindings.size()) + 1;
+    if (paged) {
+        projects.bindInt64(nextBinding++, static_cast<std::int64_t>(projectQuery.limit));
+        projects.bindInt64(nextBinding, static_cast<std::int64_t>(projectQuery.offset));
+    }
+
+    std::vector<StoredProject> storedProjects;
+    std::unordered_map<ProjectId, std::size_t> projectIndexes;
+    while (projects.stepRow()) {
+        const ProjectId id = SqliteProjectIdCodec::decode(projects.columnText(0));
+        const std::size_t index = storedProjects.size();
+        if (!projectIndexes.emplace(id, index).second) {
+            throw std::runtime_error("SQLite project IDs must be unique");
+        }
+        storedProjects.push_back(StoredProject{
+            id,
+            projects.columnText(1),
+            projects.columnText(2),
+            projects.columnText(3),
+            {},
+        });
+    }
+
+    if (storedProjects.empty()) {
+        return {};
+    }
+
+    std::string tagsSql =
+        "SELECT project_id,position,tag,typeof(position) FROM project_tags WHERE project_id IN (";
+    for (std::size_t index = 0; index < storedProjects.size(); ++index) {
+        if (index != 0) {
+            tagsSql += ',';
+        }
+        tagsSql += '?';
+        tagsSql += std::to_string(index + 1);
+    }
+    tagsSql += ") ORDER BY project_id ASC,position ASC";
+
+    auto tags = connection.prepare(tagsSql);
+    for (std::size_t index = 0; index < storedProjects.size(); ++index) {
+        tags.bindText(static_cast<int>(index + 1),
+                      SqliteProjectIdCodec::encode(storedProjects[index].id));
+    }
+    while (tags.stepRow()) {
+        const ProjectId projectId = SqliteProjectIdCodec::decode(tags.columnText(0));
+        const auto projectIndex = projectIndexes.find(projectId);
+        if (projectIndex == projectIndexes.end()) {
+            throw std::runtime_error("SQLite project tag references a missing project");
+        }
+        StoredProject& project = storedProjects[projectIndex->second];
+        const std::int64_t position = readTagPosition(tags, 1, 3);
+        if (position < 0 || static_cast<std::uint64_t>(position) != project.tags.size()) {
+            throw std::runtime_error("invalid SQLite project tag positions");
+        }
+        project.tags.push_back(tags.columnText(2));
+    }
+
+    std::vector<Project> result;
+    result.reserve(storedProjects.size());
+    for (StoredProject& project : storedProjects) {
+        result.emplace_back(project.id,
+                            std::move(project.name),
+                            std::move(project.tags),
+                            std::move(project.description),
+                            std::move(project.status));
+    }
+    return result;
+}
+
 }  // namespace
 
 SqliteProjectRepository::SqliteProjectRepository(
@@ -346,11 +501,45 @@ std::optional<Project> SqliteProjectRepository::findById(ProjectId id) const {
 }
 
 std::vector<Project> SqliteProjectRepository::query(const ProjectQuery& projectQuery) const {
-    return ProjectQueryEvaluator::query(loadStore().projects, projectQuery);
+    try {
+        SqliteReadTransaction transaction(*connection_);
+        static_cast<void>(sortSql(projectQuery.sort));
+        const QueryFilter filter = buildQueryFilter(projectQuery);
+        std::vector<Project> result =
+            readQueriedProjects(*connection_, projectQuery, filter);
+        transaction.commit();
+        return result;
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string("failed to query SQLite projects: ") + error.what());
+    }
 }
 
 std::uint64_t SqliteProjectRepository::count(const ProjectQuery& projectQuery) const {
-    return ProjectQueryEvaluator::count(loadStore().projects, projectQuery);
+    try {
+        SqliteReadTransaction transaction(*connection_);
+        static_cast<void>(sortSql(projectQuery.sort));
+        const QueryFilter filter = buildQueryFilter(projectQuery);
+        std::string sql = "SELECT COUNT(*) FROM projects p";
+        if (!filter.where.empty()) {
+            sql += " WHERE " + filter.where;
+        }
+        auto statement = connection_->prepare(sql);
+        bindFilter(statement, filter);
+        if (!statement.stepRow()) {
+            throw std::runtime_error("SQLite count query returned no row");
+        }
+        const std::int64_t count = statement.columnInt64(0);
+        if (count < 0) {
+            throw std::runtime_error("SQLite count query returned a negative value");
+        }
+        if (statement.stepRow()) {
+            throw std::runtime_error("SQLite count query returned multiple rows");
+        }
+        transaction.commit();
+        return static_cast<std::uint64_t>(count);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string("failed to count SQLite projects: ") + error.what());
+    }
 }
 
 }  // namespace devmanager
