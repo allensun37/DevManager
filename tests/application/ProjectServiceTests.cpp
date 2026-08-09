@@ -7,7 +7,9 @@
 #include <atomic>
 #include <cstdint>
 #include <map>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -97,6 +99,86 @@ TEST(ProjectServiceTest, ConcurrentAddsAreSerializedByTheServiceMutex) {
     for (std::size_t index = 0; index < ids.size(); ++index) {
         EXPECT_EQ(ids[index], index + 1U);
     }
+}
+
+TEST(ProjectServiceTest, PageProjectsUsesOneBasedPagesAndPreservesTotal) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    static_cast<void>(service.addProject("First", {"C++"}, "", "active"));
+    static_cast<void>(service.addProject("Second", {"C++"}, "", "active"));
+
+    devmanager::ProjectQuery query;
+    query.status = "active";
+    const devmanager::PagedProjects page = service.pageProjects(query, 2, 1);
+
+    EXPECT_EQ(page.total, 2U);
+    EXPECT_EQ(page.page, 2U);
+    EXPECT_EQ(page.size, 1U);
+    ASSERT_EQ(page.items.size(), 1U);
+    EXPECT_EQ(page.items.front().name(), "Second");
+}
+
+TEST(ProjectServiceTest, PageProjectsRejectsInvalidPageSizeAndOverflow) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    const devmanager::ProjectQuery query;
+
+    EXPECT_THROW(static_cast<void>(service.pageProjects(query, 0, 1)), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(service.pageProjects(query, 1, 0)), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(service.pageProjects(query, 1, 101)), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(service.pageProjects(
+                     query, std::numeric_limits<std::uint64_t>::max(), 2)),
+                 std::invalid_argument);
+}
+
+TEST(ProjectServiceTest, PageProjectsReturnsEmptyItemsPastEndWithTotal) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    static_cast<void>(service.addProject("Only", {"C++"}, "", "active"));
+
+    const devmanager::PagedProjects page = service.pageProjects({}, 2, 1);
+    EXPECT_EQ(page.total, 1U);
+    EXPECT_TRUE(page.items.empty());
+}
+
+TEST(ProjectServiceTest, QueryProjectsRejectsCallerPaginationAndReturnsAllMatches) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    static_cast<void>(service.addProject("Active One", {"C++"}, "", "active"));
+    static_cast<void>(service.addProject("Active Two", {"Rust"}, "", "active"));
+    static_cast<void>(service.addProject("Done", {"C++"}, "", "done"));
+
+    devmanager::ProjectQuery query;
+    query.status = "active";
+    const std::vector<devmanager::Project> matches = service.queryProjects(query);
+    ASSERT_EQ(matches.size(), 2U);
+    EXPECT_EQ(matches[0].name(), "Active One");
+    EXPECT_EQ(matches[1].name(), "Active Two");
+
+    query.offset = 1;
+    EXPECT_THROW(static_cast<void>(service.queryProjects(query)), std::invalid_argument);
+    query.offset = 0;
+    query.limit = 1;
+    EXPECT_THROW(static_cast<void>(service.queryProjects(query)), std::invalid_argument);
+}
+
+TEST(ProjectServiceTest, QueryProjectsPreservesFiltersAndSortSemantics) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    static_cast<void>(service.addProject("Zulu Tool", {"C++", "CMake"}, "", "active"));
+    static_cast<void>(service.addProject("Alpha Tool", {"C++"}, "", "active"));
+    static_cast<void>(service.addProject("Alpha Done", {"C++"}, "", "done"));
+
+    devmanager::ProjectQuery query;
+    query.name = "tool";
+    query.status = " ACTIVE ";
+    query.technology = "c++";
+    query.sort = devmanager::ProjectSortKey::Name;
+    const std::vector<devmanager::Project> matches = service.queryProjects(query);
+
+    ASSERT_EQ(matches.size(), 2U);
+    EXPECT_EQ(matches[0].name(), "Alpha Tool");
+    EXPECT_EQ(matches[1].name(), "Zulu Tool");
 }
 
 }  // namespace

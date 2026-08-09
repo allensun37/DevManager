@@ -3,6 +3,7 @@
 #include "common/AsciiText.h"
 
 #include <algorithm>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -108,6 +109,44 @@ std::vector<Project> ProjectService::sortProjects(std::vector<Project> projects,
         return leftValue < rightValue;
     });
     return projects;
+}
+
+std::vector<Project> ProjectService::queryProjects(ProjectQuery query) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (query.offset != 0 || query.limit != 0) {
+        throw std::invalid_argument(
+            "ProjectService::queryProjects requires offset and limit to be zero");
+    }
+    return manager_.queryProjects(query);
+}
+
+PagedProjects ProjectService::pageProjects(ProjectQuery query,
+                                           std::uint64_t page,
+                                           std::uint64_t size) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (page == 0) {
+        throw std::invalid_argument("ProjectService::pageProjects page must be at least 1");
+    }
+    if (size == 0 || size > 100) {
+        throw std::invalid_argument(
+            "ProjectService::pageProjects size must be between 1 and 100");
+    }
+
+    const std::uint64_t pageIndex = page - 1;
+    if (pageIndex > std::numeric_limits<std::uint64_t>::max() / size) {
+        throw std::invalid_argument(
+            "ProjectService::pageProjects page and size produce an overflowing offset");
+    }
+    const std::uint64_t offset = pageIndex * size;
+
+    ProjectQuery countQuery = query;
+    countQuery.offset = 0;
+    countQuery.limit = 0;
+    const std::uint64_t total = manager_.countProjects(countQuery);
+
+    query.offset = offset;
+    query.limit = size;
+    return PagedProjects{manager_.queryProjects(query), total, page, size};
 }
 
 ProjectStatistics ProjectService::statistics() const {

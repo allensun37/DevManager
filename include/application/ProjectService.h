@@ -3,6 +3,7 @@
 #include "application/ProjectManager.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -40,6 +41,10 @@ public:
     [[nodiscard]] std::vector<Project> sortedProjects(ProjectSortKey key) const;
     [[nodiscard]] std::vector<Project> sortProjects(std::vector<Project> projects,
                                                     ProjectSortKey key) const;
+    [[nodiscard]] std::vector<Project> queryProjects(ProjectQuery query) const;
+    [[nodiscard]] PagedProjects pageProjects(ProjectQuery query,
+                                             std::uint64_t page,
+                                             std::uint64_t size) const;
     [[nodiscard]] ProjectStatistics statistics() const;
 
 private:
