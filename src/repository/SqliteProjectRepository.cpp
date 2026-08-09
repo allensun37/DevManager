@@ -33,6 +33,8 @@ public:
     explicit SqliteReadTransaction(SqliteConnection& connection)
         : connection_(connection) {
         connection_.execute("BEGIN DEFERRED");
+        // Establish the read snapshot before callers prepare their first data query.
+        connection_.execute("SELECT singleton FROM repository_state LIMIT 1");
     }
 
     ~SqliteReadTransaction() noexcept {
@@ -310,10 +312,12 @@ void SqliteProjectRepository::remove(ProjectId id) {
 
 std::optional<Project> SqliteProjectRepository::findById(ProjectId id) const {
     try {
+        SqliteReadTransaction transaction(*connection_);
         auto project = connection_->prepare(
             "SELECT id,name,description,status FROM projects WHERE id = ?1");
         project.bindText(1, SqliteProjectIdCodec::encode(id));
         if (!project.stepRow()) {
+            transaction.commit();
             return std::nullopt;
         }
 
@@ -326,6 +330,7 @@ std::optional<Project> SqliteProjectRepository::findById(ProjectId id) const {
         if (project.stepRow()) {
             throw std::runtime_error("SQLite project ID is not unique");
         }
+        transaction.commit();
         return result;
     } catch (const std::exception& error) {
         throw std::runtime_error(std::string("failed to find SQLite project: ") + error.what());

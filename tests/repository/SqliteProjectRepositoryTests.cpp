@@ -587,6 +587,45 @@ TEST_F(SqliteProjectRepositoryTest, LoadStoreUsesOneSnapshotAcrossProjectsAndTag
     expectProjectsEqual(readerStore->projects.front(), original);
 }
 
+TEST_F(SqliteProjectRepositoryTest, FindByIdUsesOneSnapshotAcrossProjectAndTags) {
+    const Project original = makeProject(1, "Original", {"Old", "Tags"});
+    const Project updated = makeProject(1, "Updated", {"New", "Tags", "New"});
+    repository_->create(original, 2);
+    ASSERT_EQ(scalarText(*rawConnection_, "PRAGMA journal_mode = WAL"), "wal");
+    auto writerConnection = std::make_unique<SqliteConnection>(database_.path());
+    devmanager::MigrationManager(*writerConnection).migrate(devmanager::kEmbeddedMigrations);
+    SqliteProjectRepository writer(std::move(writerConnection));
+    StatementPause pause(*rawConnection_,
+                         "SELECT id,name,description,status FROM projects");
+    std::optional<Project> readerProject;
+    std::exception_ptr readerError;
+    std::thread reader([this, &readerProject, &readerError] {
+        try {
+            readerProject = repository_->findById(1);
+        } catch (...) {
+            readerError = std::current_exception();
+        }
+    });
+
+    const bool paused = pause.waitUntilPaused();
+    std::exception_ptr writerError;
+    if (paused) {
+        try {
+            writer.update(updated);
+        } catch (...) {
+            writerError = std::current_exception();
+        }
+    }
+    pause.release();
+    reader.join();
+
+    ASSERT_TRUE(paused) << "reader did not reach the controlled project query";
+    EXPECT_EQ(writerError, nullptr);
+    EXPECT_EQ(readerError, nullptr);
+    ASSERT_TRUE(readerProject.has_value());
+    expectProjectsEqual(*readerProject, original);
+}
+
 TEST_F(SqliteProjectRepositoryTest, CreateRollsBackProjectTagsAndNextIdWhenSecondTagFails) {
     repository_->create(makeProject(1, "Existing", {"C"}), 2);
     const ProjectStore before = loadStore();
