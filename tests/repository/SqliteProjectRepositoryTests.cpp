@@ -439,6 +439,19 @@ TEST_F(SqliteProjectRepositoryTest, MissingRepositoryStateSingletonMakesLoadFail
     EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
 }
 
+TEST_F(SqliteProjectRepositoryTest, ReadSnapshotFailureRollsBackStartedTransaction) {
+    rawConnection_->execute("DROP TABLE repository_state");
+
+    EXPECT_THROW(static_cast<void>(repository_->loadStore()), std::runtime_error);
+
+    rawConnection_->execute(
+        "CREATE TABLE repository_state(singleton INTEGER PRIMARY KEY, next_id TEXT NOT NULL)");
+    rawConnection_->execute(
+        "INSERT INTO repository_state(singleton,next_id) "
+        "VALUES (1,'00000000000000000001')");
+    EXPECT_NO_THROW(static_cast<void>(repository_->loadStore()));
+}
+
 TEST_F(SqliteProjectRepositoryTest, ExtraRepositoryStateRowMakesLoadFail) {
     rawConnection_->execute("PRAGMA ignore_check_constraints = ON");
     rawConnection_->execute(

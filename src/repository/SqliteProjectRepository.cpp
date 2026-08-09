@@ -33,8 +33,16 @@ public:
     explicit SqliteReadTransaction(SqliteConnection& connection)
         : connection_(connection) {
         connection_.execute("BEGIN DEFERRED");
-        // Establish the read snapshot before callers prepare their first data query.
-        connection_.execute("SELECT singleton FROM repository_state LIMIT 1");
+        try {
+            // Establish the read snapshot before callers prepare their first data query.
+            connection_.execute("SELECT singleton FROM repository_state LIMIT 1");
+        } catch (...) {
+            try {
+                connection_.execute("ROLLBACK");
+            } catch (...) {
+            }
+            throw;
+        }
     }
 
     ~SqliteReadTransaction() noexcept {
