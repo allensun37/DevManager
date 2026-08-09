@@ -125,6 +125,24 @@ Config ConfigLoader::load(const std::filesystem::path& configPath) {
     }
 
     if (const Json* storage = readObject(root, "storage")) {
+        if (storage->contains("type")) {
+            const Json& value = storage->at("type");
+            if (!value.is_string()) {
+                throwFieldError("storage.type", "must be a string");
+            }
+            const std::string type = value.get<std::string>();
+            if (type == "json") {
+                config.storage.type = StorageType::Json;
+                config.storage.path = "data/projects.json";
+            } else if (type == "sqlite") {
+                config.storage.type = StorageType::Sqlite;
+                config.storage.path = "data/devmanager.db";
+            } else if (type.empty()) {
+                throwFieldError("storage.type", "must be 'json' or 'sqlite'");
+            } else {
+                throwFieldError("storage.type", "must be 'json' or 'sqlite'");
+            }
+        }
         if (storage->contains("path")) {
             config.storage.path = readPath(*storage, "path", "storage.path");
         }

@@ -196,10 +196,12 @@ target_link_libraries(DevManagerRepository PUBLIC
 )
 
 add_library(DevManagerSqliteRepository
+    src/repository/RepositoryFactory.cpp
     src/repository/SqliteProjectRepository.cpp
 )
 target_include_directories(DevManagerSqliteRepository PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${DEVMANAGER_GENERATED_INCLUDE_DIR}
 )
 target_link_libraries(DevManagerSqliteRepository PUBLIC
     DevManagerRepository
@@ -247,6 +249,21 @@ target_link_libraries(DevManagerConfigTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerConfigTests)
+
+add_executable(DevManagerRepositoryFactoryTests
+    tests/repository/RepositoryFactoryTests.cpp
+)
+target_include_directories(DevManagerRepositoryFactoryTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+target_link_libraries(DevManagerRepositoryFactoryTests PRIVATE
+    DevManagerSqliteRepository
+    DevManagerConfig
+    SQLite::SQLite3
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerRepositoryFactoryTests)
 
 add_executable(DevManagerAsciiTextTests tests/common/AsciiTextTests.cpp)
 target_include_directories(DevManagerAsciiTextTests PRIVATE

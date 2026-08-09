@@ -11,7 +11,10 @@ struct ServerConfig {
     std::uint16_t port{8080};
 };
 
+enum class StorageType { Json, Sqlite };
+
 struct StorageConfig {
+    StorageType type{StorageType::Json};
     std::filesystem::path path{"data/projects.json"};
 };
 

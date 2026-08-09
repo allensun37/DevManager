@@ -53,6 +53,7 @@ TEST_F(ConfigLoaderTest, MissingFileUsesDocumentedDefaults) {
     EXPECT_EQ(config.server.host, "127.0.0.1");
     EXPECT_EQ(config.server.port, 8080);
     EXPECT_EQ(config.storage.path, std::filesystem::path{"data/projects.json"});
+    EXPECT_EQ(config.storage.type, devmanager::StorageType::Json);
     EXPECT_EQ(config.logging.level, "info");
     EXPECT_EQ(config.logging.path, std::filesystem::path{"logs/devmanager.log"});
 }
@@ -71,6 +72,54 @@ TEST_F(ConfigLoaderTest, ValidFileOverridesSupportedValues) {
     EXPECT_EQ(config.storage.path, std::filesystem::path{"custom/projects.json"});
     EXPECT_EQ(config.logging.level, "debug");
     EXPECT_EQ(config.logging.path, std::filesystem::path{"custom/devmanager.log"});
+}
+
+TEST_F(ConfigLoaderTest, StorageTypeDefaultsToJsonWhenOmitted) {
+    writeConfig(R"({"storage": {"path": "custom/projects.json"}})");
+
+    const devmanager::Config config = devmanager::ConfigLoader::load(configPath);
+
+    EXPECT_EQ(config.storage.type, devmanager::StorageType::Json);
+    EXPECT_EQ(config.storage.path, std::filesystem::path{"custom/projects.json"});
+}
+
+TEST_F(ConfigLoaderTest, ExplicitStorageTypesSelectBackends) {
+    writeConfig(R"({"storage": {"type": "json"}})");
+    const devmanager::Config jsonConfig = devmanager::ConfigLoader::load(configPath);
+    EXPECT_EQ(jsonConfig.storage.type, devmanager::StorageType::Json);
+    EXPECT_EQ(jsonConfig.storage.path, std::filesystem::path{"data/projects.json"});
+
+    writeConfig(R"({"storage": {"type": "sqlite"}})");
+    const devmanager::Config sqliteConfig = devmanager::ConfigLoader::load(configPath);
+    EXPECT_EQ(sqliteConfig.storage.type, devmanager::StorageType::Sqlite);
+    EXPECT_EQ(sqliteConfig.storage.path, std::filesystem::path{"data/devmanager.db"});
+}
+
+TEST_F(ConfigLoaderTest, ExplicitStoragePathIsPreservedForSqlite) {
+    writeConfig(R"({"storage": {"type": "sqlite", "path": "custom/devmanager.db"}})");
+
+    const devmanager::Config config = devmanager::ConfigLoader::load(configPath);
+
+    EXPECT_EQ(config.storage.type, devmanager::StorageType::Sqlite);
+    EXPECT_EQ(config.storage.path, std::filesystem::path{"custom/devmanager.db"});
+}
+
+TEST_F(ConfigLoaderTest, RejectsUnknownOrNonStringStorageType) {
+    writeConfig(R"({"storage": {"type": "postgres"}})");
+    try {
+        static_cast<void>(devmanager::ConfigLoader::load(configPath));
+        FAIL() << "Expected unknown storage.type validation error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("storage.type"), std::string::npos);
+    }
+
+    writeConfig(R"({"storage": {"type": 1}})");
+    try {
+        static_cast<void>(devmanager::ConfigLoader::load(configPath));
+        FAIL() << "Expected non-string storage.type validation error";
+    } catch (const std::runtime_error& error) {
+        EXPECT_NE(std::string(error.what()).find("storage.type"), std::string::npos);
+    }
 }
 
 TEST_F(ConfigLoaderTest, RejectsNonObjectJson) {
