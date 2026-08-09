@@ -361,6 +361,16 @@ target_link_libraries(DevManagerSqliteProjectRepositoryTests PRIVATE
 )
 gtest_discover_tests(DevManagerSqliteProjectRepositoryTests)
 
+add_executable(DevManagerProjectRepositoryContractTests
+    tests/repository/ProjectRepositoryContractTests.cpp
+)
+target_link_libraries(DevManagerProjectRepositoryContractTests PRIVATE
+    DevManagerSqliteRepository
+    SQLite::SQLite3
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerProjectRepositoryContractTests)
+
 add_executable(DevManagerSqliteInfrastructureTests
     tests/infrastructure/sqlite/SqliteConnectionTests.cpp
 )
