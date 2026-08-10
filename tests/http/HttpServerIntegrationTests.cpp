@@ -34,13 +34,37 @@ std::filesystem::path makeLoggerTestDirectory() {
     return directory;
 }
 
-std::filesystem::path makeSqliteTestPath() {
+std::filesystem::path makeSqliteTestDirectory() {
     static std::atomic_uint64_t counter{0};
     const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::filesystem::temp_directory_path() /
-           ("devmanager-http-sqlite-" + std::to_string(timestamp) + "-" +
-            std::to_string(counter++) + ".db");
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("devmanager-http-sqlite-" + std::to_string(timestamp) +
+                            "-" + std::to_string(counter++));
+    std::filesystem::create_directories(directory);
+    return directory;
 }
+
+class TemporarySqliteDatabase final {
+public:
+    TemporarySqliteDatabase()
+        : directory_(makeSqliteTestDirectory()), databasePath_(directory_ / "devmanager.db") {}
+
+    ~TemporarySqliteDatabase() {
+        std::error_code error;
+        std::filesystem::remove_all(directory_, error);
+    }
+
+    TemporarySqliteDatabase(const TemporarySqliteDatabase&) = delete;
+    TemporarySqliteDatabase& operator=(const TemporarySqliteDatabase&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return databasePath_;
+    }
+
+private:
+    std::filesystem::path directory_;
+    std::filesystem::path databasePath_;
+};
 
 std::string readLoggerFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -141,7 +165,8 @@ TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
 }
 
 TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPagination) {
-    const std::filesystem::path databasePath = makeSqliteTestPath();
+    const TemporarySqliteDatabase database;
+    const std::filesystem::path& databasePath = database.path();
     {
         auto repository = devmanager::RepositoryFactory::create(
             devmanager::StorageConfig{devmanager::StorageType::Sqlite, databasePath});
@@ -151,18 +176,21 @@ TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPaginat
         RunningServer running(server);
         ASSERT_TRUE(running.waitUntilReady());
 
-        ASSERT_EQ(postJson(server,
-                           R"({"name":"Zulu","techStack":["C++"],"description":"","status":"active"})")
-                      ->status,
-                  201);
-        ASSERT_EQ(postJson(server,
-                           R"({"name":"Alpha","techStack":["CMake"],"description":"","status":"active"})")
-                      ->status,
-                  201);
-        ASSERT_EQ(postJson(server,
-                           R"({"name":"Planned","techStack":["Rust"],"description":"","status":"planned"})")
-                      ->status,
-                  201);
+        const auto zulu = postJson(
+            server,
+            R"({"name":"Zulu","techStack":["C++"],"description":"","status":"active"})");
+        ASSERT_TRUE(zulu);
+        ASSERT_EQ(zulu->status, 201);
+        const auto alpha = postJson(
+            server,
+            R"({"name":"Alpha","techStack":["CMake"],"description":"","status":"active"})");
+        ASSERT_TRUE(alpha);
+        ASSERT_EQ(alpha->status, 201);
+        const auto planned = postJson(
+            server,
+            R"({"name":"Planned","techStack":["Rust"],"description":"","status":"planned"})");
+        ASSERT_TRUE(planned);
+        ASSERT_EQ(planned->status, 201);
     }
 
     {
@@ -185,10 +213,6 @@ TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPaginat
         EXPECT_EQ(response->get_header_value("X-Page"), "2");
         EXPECT_EQ(response->get_header_value("X-Page-Size"), "1");
     }
-
-    std::error_code error;
-    std::filesystem::remove(databasePath, error);
-    ASSERT_FALSE(error) << "Failed to remove SQLite test database: " << error.message();
 }
 
 TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {
