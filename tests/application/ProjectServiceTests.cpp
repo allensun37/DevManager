@@ -141,6 +141,20 @@ TEST(ProjectServiceTest, PageProjectsReturnsEmptyItemsPastEndWithTotal) {
     EXPECT_TRUE(page.items.empty());
 }
 
+TEST(ProjectServiceTest, PageProjectsReturnsEmptyForHugeOffsetWithoutRepositoryQuery) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    static_cast<void>(service.addProject("Only", {"C++"}, "", "active"));
+
+    const devmanager::PagedProjects page = service.pageProjects(
+        {}, std::numeric_limits<std::uint64_t>::max(), 1);
+
+    EXPECT_EQ(page.total, 1U);
+    EXPECT_EQ(page.page, std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(page.size, 1U);
+    EXPECT_TRUE(page.items.empty());
+}
+
 TEST(ProjectServiceTest, QueryProjectsRejectsCallerPaginationAndReturnsAllMatches) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);

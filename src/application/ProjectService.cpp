@@ -144,6 +144,14 @@ PagedProjects ProjectService::pageProjects(ProjectQuery query,
     countQuery.limit = 0;
     const std::uint64_t total = manager_.countProjects(countQuery);
 
+    if (offset >= total) {
+        return PagedProjects{{}, total, page, size};
+    }
+    if (offset > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        throw std::invalid_argument(
+            "ProjectService::pageProjects offset exceeds repository-supported range");
+    }
+
     query.offset = offset;
     query.limit = size;
     return PagedProjects{manager_.queryProjects(query), total, page, size};
