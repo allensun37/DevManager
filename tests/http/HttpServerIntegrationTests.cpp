@@ -1,8 +1,10 @@
 #include "application/ProjectManager.h"
 #include "application/ProjectService.h"
 #include "DevManagerVersion.h"
+#include "config/Config.h"
 #include "http/HttpServer.h"
 #include "infrastructure/logging/Logger.h"
+#include "repository/RepositoryFactory.h"
 
 #include <gtest/gtest.h>
 #include <httplib.h>
@@ -30,6 +32,14 @@ std::filesystem::path makeLoggerTestDirectory() {
                             "-" + std::to_string(counter++));
     std::filesystem::create_directories(directory);
     return directory;
+}
+
+std::filesystem::path makeSqliteTestPath() {
+    static std::atomic_uint64_t counter{0};
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           ("devmanager-http-sqlite-" + std::to_string(timestamp) + "-" +
+            std::to_string(counter++) + ".db");
 }
 
 std::string readLoggerFile(const std::filesystem::path& path) {
@@ -128,6 +138,57 @@ TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
     ASSERT_TRUE(response);
     EXPECT_EQ(response->status, 200);
     EXPECT_EQ(nlohmann::json::parse(response->body), nlohmann::json::array());
+}
+
+TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPagination) {
+    const std::filesystem::path databasePath = makeSqliteTestPath();
+    {
+        auto repository = devmanager::RepositoryFactory::create(
+            devmanager::StorageConfig{devmanager::StorageType::Sqlite, databasePath});
+        devmanager::ProjectManager manager(*repository);
+        devmanager::ProjectService service(manager);
+        devmanager::HttpServer server(service, "127.0.0.1", 0);
+        RunningServer running(server);
+        ASSERT_TRUE(running.waitUntilReady());
+
+        ASSERT_EQ(postJson(server,
+                           R"({"name":"Zulu","techStack":["C++"],"description":"","status":"active"})")
+                      ->status,
+                  201);
+        ASSERT_EQ(postJson(server,
+                           R"({"name":"Alpha","techStack":["CMake"],"description":"","status":"active"})")
+                      ->status,
+                  201);
+        ASSERT_EQ(postJson(server,
+                           R"({"name":"Planned","techStack":["Rust"],"description":"","status":"planned"})")
+                      ->status,
+                  201);
+    }
+
+    {
+        auto repository = devmanager::RepositoryFactory::create(
+            devmanager::StorageConfig{devmanager::StorageType::Sqlite, databasePath});
+        devmanager::ProjectManager manager(*repository);
+        devmanager::ProjectService service(manager);
+        devmanager::HttpServer server(service, "127.0.0.1", 0);
+        RunningServer running(server);
+        ASSERT_TRUE(running.waitUntilReady());
+
+        const auto response = get(server, "/api/projects?status=active&sort=name&page=2&size=1");
+        ASSERT_TRUE(response);
+        ASSERT_EQ(response->status, 200);
+        const auto body = nlohmann::json::parse(response->body);
+        ASSERT_TRUE(body.is_array());
+        ASSERT_EQ(body.size(), 1U);
+        EXPECT_EQ(body.at(0).at("name"), "Zulu");
+        EXPECT_EQ(response->get_header_value("X-Total-Count"), "2");
+        EXPECT_EQ(response->get_header_value("X-Page"), "2");
+        EXPECT_EQ(response->get_header_value("X-Page-Size"), "1");
+    }
+
+    std::error_code error;
+    std::filesystem::remove(databasePath, error);
+    ASSERT_FALSE(error) << "Failed to remove SQLite test database: " << error.message();
 }
 
 TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {

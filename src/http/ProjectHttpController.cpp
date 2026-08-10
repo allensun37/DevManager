@@ -18,6 +18,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <charconv>
 
 namespace devmanager {
 namespace {
@@ -63,9 +64,21 @@ void sendException(httplib::Response& response, const std::exception& error) {
 }
 
 [[nodiscard]] bool isKnownQueryParameter(std::string_view key) {
-    constexpr std::array<std::string_view, 4> knownKeys{
-        "name", "technology", "status", "sort"};
+    constexpr std::array<std::string_view, 6> knownKeys{
+        "name", "technology", "status", "sort", "page", "size"};
     return std::find(knownKeys.begin(), knownKeys.end(), key) != knownKeys.end();
+}
+
+[[nodiscard]] std::optional<std::uint64_t> parseQueryUint64(std::string_view value) {
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    std::uint64_t parsed = 0;
+    const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+    if (result.ec != std::errc{} || result.ptr != value.data() + value.size()) {
+        return std::nullopt;
+    }
+    return parsed;
 }
 
 [[nodiscard]] bool isFilterParameter(std::string_view key) {
@@ -294,21 +307,41 @@ void ProjectHttpController::handleList(const httplib::Request& request,
             return;
         }
 
-        std::vector<Project> projects;
+        ProjectQuery query;
+        query.sort = sortKey.value_or(ProjectSortKey::Id);
         if (filterKey == "name") {
-            projects = service_.searchByName(request.get_param_value("name"));
+            query.name = request.get_param_value("name");
         } else if (filterKey == "technology") {
-            projects = service_.searchByTechnology(request.get_param_value("technology"));
+            query.technology = request.get_param_value("technology");
         } else if (filterKey == "status") {
-            projects = service_.filterByStatus(request.get_param_value("status"));
-        } else if (sortKey.has_value()) {
-            projects = service_.sortedProjects(*sortKey);
-        } else {
-            projects = service_.listProjects();
+            query.status = request.get_param_value("status");
         }
 
-        if (sortKey.has_value() && !filterKey.empty()) {
-            projects = service_.sortProjects(std::move(projects), *sortKey);
+        const bool paged = request.has_param("page") || request.has_param("size");
+        std::vector<Project> projects;
+        std::optional<PagedProjects> pagedProjects;
+        if (!paged) {
+            projects = service_.queryProjects(query);
+        } else {
+            const std::optional<std::uint64_t> page = request.has_param("page")
+                                                         ? parseQueryUint64(request.get_param_value("page"))
+                                                         : std::optional<std::uint64_t>{1};
+            const std::optional<std::uint64_t> size = request.has_param("size")
+                                                         ? parseQueryUint64(request.get_param_value("size"))
+                                                         : std::optional<std::uint64_t>{20};
+            if (!page.has_value() || !size.has_value()) {
+                sendError(response,
+                          HttpError{400, "invalid_query", "Project query is invalid"});
+                return;
+            }
+            try {
+                pagedProjects = service_.pageProjects(query, *page, *size);
+            } catch (const std::invalid_argument&) {
+                sendError(response,
+                          HttpError{400, "invalid_query", "Project query is invalid"});
+                return;
+            }
+            projects = pagedProjects->items;
         }
 
         nlohmann::json payload = nlohmann::json::array();
@@ -317,6 +350,11 @@ void ProjectHttpController::handleList(const httplib::Request& request,
         }
 
         response.status = 200;
+        if (pagedProjects.has_value()) {
+            response.set_header("X-Total-Count", std::to_string(pagedProjects->total));
+            response.set_header("X-Page", std::to_string(pagedProjects->page));
+            response.set_header("X-Page-Size", std::to_string(pagedProjects->size));
+        }
         response.set_content(payload.dump(), kJsonContentType);
     } catch (const std::exception& error) {
         sendException(response, error);

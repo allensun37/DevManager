@@ -221,6 +221,69 @@ TEST(ProjectHttpControllerTest, ListsAllProjectsWhenNoQueryIsPresent) {
     ASSERT_EQ(body.size(), 2U);
     EXPECT_EQ(body.at(0).at("name"), "Zeta");
     EXPECT_EQ(body.at(1).at("name"), "Alpha");
+    EXPECT_TRUE(response->get_header_value("X-Total-Count").empty());
+    EXPECT_TRUE(response->get_header_value("X-Page").empty());
+    EXPECT_TRUE(response->get_header_value("X-Page-Size").empty());
+}
+
+TEST(ProjectHttpControllerTest, PaginatesWithCompatibleArrayBodyAndHeaders) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "", "active"), 1U);
+    ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "", "planned"), 2U);
+    ASSERT_EQ(manager.addProject("Beta", {"Rust"}, "", "active"), 3U);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = get(server, "/api/projects?name=a&sort=name&page=1&size=1");
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 200);
+    const auto body = nlohmann::json::parse(response->body);
+    ASSERT_TRUE(body.is_array());
+    ASSERT_EQ(body.size(), 1U);
+    EXPECT_EQ(body.at(0).at("name"), "Alpha");
+    EXPECT_EQ(response->get_header_value("X-Total-Count"), "3");
+    EXPECT_EQ(response->get_header_value("X-Page"), "1");
+    EXPECT_EQ(response->get_header_value("X-Page-Size"), "1");
+}
+
+TEST(ProjectHttpControllerTest, RejectsMalformedPagingValues) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    for (const std::string& query : {"page=0", "size=0", "size=101", "page=-1",
+                                     "page=+1", "page=1.5", "page=", "page=1&page=2",
+                                     "page=%201", "page=18446744073709551616"}) {
+        const auto response = get(server, "/api/projects?" + query);
+        ASSERT_TRUE(response) << query;
+        ASSERT_EQ(response->status, 400) << query;
+        EXPECT_EQ(nlohmann::json::parse(response->body).at("error").at("code"),
+                  "invalid_query")
+            << query;
+    }
+}
+
+TEST(ProjectHttpControllerTest, ReturnsEmptyPagePastEndWithAccurateHeaders) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    ASSERT_EQ(manager.addProject("Only", {"C++"}, "", "active"), 1U);
+    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const auto response = get(server, "/api/projects?page=2&size=1");
+
+    ASSERT_TRUE(response);
+    ASSERT_EQ(response->status, 200);
+    EXPECT_TRUE(nlohmann::json::parse(response->body).empty());
+    EXPECT_EQ(response->get_header_value("X-Total-Count"), "1");
+    EXPECT_EQ(response->get_header_value("X-Page"), "2");
+    EXPECT_EQ(response->get_header_value("X-Page-Size"), "1");
 }
 
 TEST(ProjectHttpControllerTest, AllowsSortWithoutAFilter) {
