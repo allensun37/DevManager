@@ -1,0 +1,14 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "storage": {
+    "type": "sqlite",
+    "path": "data/devmanager.db"
+  },
+  "logging": {
+    "level": "info",
+    "path": "logs/devmanager.log"
+  }
+}

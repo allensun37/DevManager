@@ -1,4 +1,4 @@
-"""Validate the checked-in v0.4 release contract without third-party packages.
+"""Validate the checked-in v0.5 release contract without third-party packages.
 
 This is intentionally a small, deterministic guard for local release checks. The
 OpenAPI schema itself is validated separately with the pinned validator.
@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 def read(relative: str) -> str:
@@ -32,24 +32,43 @@ def main() -> int:
     version_template = read("cmake/DevManagerVersion.h.in")
     openapi = read("docs/openapi.yaml")
     readme = read("README.md")
+    example_config = read("config/devmanager.example.json")
     workflow = read(".github/workflows/ci.yml")
 
     if not re.search(rf"project\(\s*DevManager\s+VERSION\s+{re.escape(VERSION)}\b", cmake):
-        raise AssertionError("CMake project version is not 0.4.0")
+        raise AssertionError("CMake project version is not 0.5.0")
     require(version_template, "@PROJECT_VERSION@", "cmake/DevManagerVersion.h.in")
     require(openapi, f"version: {VERSION}", "docs/openapi.yaml")
 
     for marker in (
         f"v{VERSION}",
         "config/devmanager.json",
+        "config/devmanager.example.json",
+        '"storage": { "type": "json", "path": "data/projects.json" }',
+        '"storage": { "type": "sqlite", "path": "data/devmanager.db" }',
+        "JSON 和 SQLite 是互斥、独立的后端",
+        "不会自动迁移数据，也不会删除原后端的数据",
+        "migration 只对 SQLite 后端执行",
+        "page` 和 `size` 是可选的分页参数",
+        "不提供 `page`/`size` 时保持 v0.4 的数组契约",
         "/health",
         "/api/info",
         "/api/statistics",
         "X-Request-ID",
-        "ctest --test-dir build -C Debug --output-on-failure",
+        "ctest --test-dir build-v05-final -C Debug --output-on-failure",
         "C++17",
     ):
         require(readme, marker, "README.md")
+
+    for marker in (
+        '"host": "127.0.0.1"',
+        '"port": 8080',
+        '"type": "sqlite"',
+        '"path": "data/devmanager.db"',
+        '"level": "info"',
+        '"path": "logs/devmanager.log"',
+    ):
+        require(example_config, marker, "config/devmanager.example.json")
 
     for marker in (
         "ubuntu-latest",
