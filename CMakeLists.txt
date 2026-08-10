@@ -439,6 +439,22 @@ target_link_libraries(DevManagerHttp PUBLIC
     CppHttplib
 )
 
+# API-key authentication contract (implementation is introduced in the next TDD step).
+add_library(DevManagerAuth INTERFACE)
+target_include_directories(DevManagerAuth INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(DevManagerApiKeyAuthTests
+    tests/infrastructure/auth/EnvironmentApiKeyProviderTests.cpp
+    tests/infrastructure/auth/ApiKeyAuthenticatorTests.cpp
+)
+target_link_libraries(DevManagerApiKeyAuthTests PRIVATE
+    DevManagerAuth
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerApiKeyAuthTests)
+
 add_executable(DevManagerProjectHttpJsonMapperTests
     tests/http/ProjectHttpJsonMapperTests.cpp
 )
