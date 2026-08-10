@@ -15,6 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+      # Keep contract checks and ctest in this shared matrix so both platforms execute them.
 
     steps:
       - name: Check out source

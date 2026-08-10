@@ -19,9 +19,15 @@ paths:
       operationId: listProjects
       summary: List, search, filter, or sort projects
       description: >-
-        Returns all projects when no query is supplied. At most one of name,
-        technology, and status may be supplied; sort may be combined with one
-        filter and orders the resulting list in ascending order.
+        Returns all projects when no query is supplied. At most one of name, technology, and status
+        may be supplied; sort may be combined with one filter and orders the resulting list in
+        ascending order. Sort and pagination may be combined with that single filter. The optional
+        page and size integer parameters enable pagination; if either
+        is supplied, the response remains a JSON array and exposes X-Total-Count, X-Page, and
+        X-Page-Size response headers. When one is omitted, page defaults to 1 and size defaults to
+        20. Without page or size, the array response is compatible with v0.4. The JSON/SQLite
+        backends apply the same filtering, sorting, pagination, and response semantics transparently.
+        Pagination metadata is carried only in headers, not an items/total envelope.
       parameters:
         - $ref: '#/components/parameters/RequestId'
         - name: name
@@ -48,12 +54,34 @@ paths:
           schema:
             type: string
             enum: [id, name, status]
+        - name: page
+          in: query
+          description: One-based page number; defaults to 1 when size is supplied without page.
+          schema:
+            type: integer
+            minimum: 1
+        - name: size
+          in: query
+          description: Number of projects per page; defaults to 20 when page is supplied without size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
       responses:
         '200':
-          description: Project list.
+          description: >-
+            Project list as a JSON array. X-Total-Count, X-Page, and X-Page-Size are present only
+            when page or size is explicitly supplied; otherwise the response is the unpaged v0.4
+            array form.
           headers:
             X-Request-ID:
               $ref: '#/components/headers/RequestId'
+            X-Total-Count:
+              $ref: '#/components/headers/TotalCount'
+            X-Page:
+              $ref: '#/components/headers/Page'
+            X-Page-Size:
+              $ref: '#/components/headers/PageSize'
           content:
             application/json:
               schema:
@@ -234,6 +262,22 @@ components:
         minLength: 1
         maxLength: 64
         pattern: '^[A-Za-z0-9._-]+$'
+    TotalCount:
+      description: Total number of projects matching the optional filter, before pagination.
+      schema:
+        type: integer
+        minimum: 0
+    Page:
+      description: One-based page number used for the paginated response.
+      schema:
+        type: integer
+        minimum: 1
+    PageSize:
+      description: Number of projects returned per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
 
   schemas:
     Project:

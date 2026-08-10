@@ -8,6 +8,7 @@ quickly detect an incomplete contract without installing dependencies.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 
@@ -38,7 +39,21 @@ REQUIRED_MARKERS = (
     "'404'",
     "'409'",
     "'500'",
+    "name: page",
+    "name: size",
+    "X-Total-Count",
+    "X-Page",
+    "X-Page-Size",
+    "At most one of name, technology, and status",
+    "JSON/SQLite",
+    "not an items/total envelope",
 )
+
+
+def require_pattern(contents: str, pattern: str, label: str) -> str | None:
+    if re.search(pattern, contents, flags=re.DOTALL) is None:
+        return label
+    return None
 
 
 def main() -> int:
@@ -49,6 +64,41 @@ def main() -> int:
 
     contents = document.read_text(encoding="utf-8")
     missing = [marker for marker in REQUIRED_MARKERS if marker not in contents]
+    missing.extend(
+        marker
+        for marker in (
+            require_pattern(
+                contents,
+                r"name:\s+page(?:(?!\n\s*- name:).){0,500}"
+                r"type:\s+integer(?:(?!\n\s*- name:).){0,300}minimum:\s+1",
+                "page integer minimum: 1",
+            ),
+            require_pattern(
+                contents,
+                r"name:\s+size(?:(?!\n\s*- name:).){0,500}"
+                r"type:\s+integer(?:(?!\n\s*- name:).){0,300}"
+                r"minimum:\s+1(?:(?!\n\s*- name:).){0,300}maximum:\s+100",
+                "size integer minimum: 1 maximum: 100",
+            ),
+            require_pattern(
+                contents,
+                r"/api/projects:\s*\n\s+get:.*?"
+                r"responses:\s*\n\s+'200':.*?"
+                r"content:\s*\n\s+application/json:.*?"
+                r"schema:\s*\n\s+type:\s+array",
+                "GET /api/projects 200 array schema",
+            ),
+            require_pattern(
+                contents,
+                r"/api/projects:\s*\n\s+get:.*?"
+                r"responses:\s*\n\s+'200':.*?"
+                r"headers:\s*\n.*?X-Total-Count:.*?"
+                r"X-Page:.*?X-Page-Size:",
+                "GET /api/projects pagination response headers",
+            ),
+        )
+        if marker is not None
+    )
     if missing:
         print("OpenAPI contract is incomplete; missing markers:", file=sys.stderr)
         for marker in missing:
