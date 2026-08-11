@@ -196,8 +196,11 @@ TEST(HttpServerIntegrationTest,
 
     const std::vector<std::string> paths{
         "/api/info", "/api/statistics", "/api/projects", "/api/projects/1"};
+    // cpp-httplib/MinGW rejects an Authorization header with a trailing space
+    // before it reaches the server.  "Bearer" still exercises the empty-token
+    // parser branch without relying on transport-level whitespace handling.
     const std::vector<std::string> authorizations{
-        "", "Basic test-key", "Bearer wrong-key", "Bearer "};
+        "", "Basic test-key", "Bearer wrong-key", "Bearer"};
     const auto expectedBody = nlohmann::json{
         {"error", {{"code", "unauthorized"},
                     {"message", "authentication required"}}}};
@@ -248,10 +251,13 @@ TEST(HttpServerIntegrationTest, ProtectedApiEndpointsKeepBusinessResponsesForCor
     ASSERT_TRUE(projects);
     EXPECT_EQ(projects->status, 200);
 
-    const auto project = client.Get("/api/projects/1", headers);
+    const auto project = client.Put(
+        "/api/projects/1", headers,
+        R"({"name":"Protected Updated","techStack":["C++"],"description":"","status":"active"})",
+        "application/json");
     ASSERT_TRUE(project);
     EXPECT_EQ(project->status, 200);
-    EXPECT_EQ(nlohmann::json::parse(project->body).at("name"), "Protected");
+    EXPECT_EQ(nlohmann::json::parse(project->body).at("name"), "Protected Updated");
 }
 
 TEST(HttpServerIntegrationTest, UnauthorizedResponseKeepsPreRoutingRequestId) {
