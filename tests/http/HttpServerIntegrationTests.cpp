@@ -184,6 +184,76 @@ TEST(HttpServerIntegrationTest, ProtectedProjectListRequiresApiKeyAtPreRoutingBo
     EXPECT_EQ(unknown->status, 404);
 }
 
+TEST(HttpServerIntegrationTest,
+     ProtectedApiEndpointsRejectMissingMalformedAndWrongApiKeys) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    ASSERT_EQ(manager.addProject("Protected", {"C++"}, "", "active"), 1U);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const std::vector<std::string> paths{
+        "/api/info", "/api/statistics", "/api/projects", "/api/projects/1"};
+    const std::vector<std::string> authorizations{
+        "", "Basic test-key", "Bearer wrong-key", "Bearer "};
+    const auto expectedBody = nlohmann::json{
+        {"error", {{"code", "unauthorized"},
+                    {"message", "authentication required"}}}};
+
+    for (const auto& path : paths) {
+        for (const auto& authorization : authorizations) {
+            httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+            client.set_connection_timeout(0, 100000);
+            httplib::Headers headers{{"X-Request-ID", "auth-matrix"}};
+            if (!authorization.empty()) {
+                headers.emplace("Authorization", authorization);
+            }
+
+            const auto response = client.Get(path, headers);
+
+            ASSERT_TRUE(response) << path << " authorization=" << authorization;
+            EXPECT_EQ(response->status, 401)
+                << path << " authorization=" << authorization;
+            EXPECT_EQ(response->get_header_value("WWW-Authenticate"), "Bearer");
+            EXPECT_EQ(response->get_header_value("X-Request-ID"), "auth-matrix");
+            EXPECT_EQ(nlohmann::json::parse(response->body), expectedBody);
+        }
+    }
+}
+
+TEST(HttpServerIntegrationTest, ProtectedApiEndpointsKeepBusinessResponsesForCorrectApiKey) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    ASSERT_EQ(manager.addProject("Protected", {"C++"}, "", "active"), 1U);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    const httplib::Headers headers{{"Authorization", "Bearer test-key"}};
+
+    const auto info = client.Get("/api/info", headers);
+    ASSERT_TRUE(info);
+    EXPECT_EQ(info->status, 200);
+
+    const auto statistics = client.Get("/api/statistics", headers);
+    ASSERT_TRUE(statistics);
+    EXPECT_EQ(statistics->status, 200);
+
+    const auto projects = client.Get("/api/projects", headers);
+    ASSERT_TRUE(projects);
+    EXPECT_EQ(projects->status, 200);
+
+    const auto project = client.Get("/api/projects/1", headers);
+    ASSERT_TRUE(project);
+    EXPECT_EQ(project->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(project->body).at("name"), "Protected");
+}
+
 TEST(HttpServerIntegrationTest, UnauthorizedResponseKeepsPreRoutingRequestId) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
@@ -284,7 +354,6 @@ TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
-    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     httplib::Headers headers{{"X-Request-ID", "client.req-01"}};
     const auto response = client.Get("/health", headers);
 
