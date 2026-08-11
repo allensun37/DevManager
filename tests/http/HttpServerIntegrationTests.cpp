@@ -544,3 +544,42 @@ TEST(HttpServerIntegrationTest, LogsStartupAndHttpErrorsThroughInjectedLogger) {
     std::filesystem::remove_all(directory, error);
     ASSERT_FALSE(error) << "Failed to remove logger test directory: " << error.message();
 }
+
+TEST(HttpServerIntegrationTest,
+     LogsUnauthorizedRequestsWithoutAuthorizationOrApiKey) {
+    const std::filesystem::path directory = makeLoggerTestDirectory();
+    const std::filesystem::path logPath = directory / "devmanager.log";
+    {
+        devmanager::Logger logger(logPath, "info");
+        devmanager::ProjectManager manager;
+        devmanager::ProjectService service(manager);
+        const devmanager::ApiKeyAuthenticator authenticator("test-secret-key");
+        devmanager::HttpServer server(
+            service, logger, authenticator, "127.0.0.1", 0);
+        RunningServer running(server);
+        ASSERT_TRUE(running.waitUntilReady());
+
+        httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+        client.set_connection_timeout(0, 100000);
+        const httplib::Headers headers{
+            {"Authorization", "Bearer wrong-secret-key"},
+            {"X-Request-ID", "unauthorized.req"}};
+        const auto response = client.Get("/api/projects", headers);
+
+        ASSERT_TRUE(response);
+        EXPECT_EQ(response->status, 401);
+    }
+
+    const std::string contents = readLoggerFile(logPath);
+    EXPECT_NE(contents.find("HTTP unauthorized method=GET path=/api/projects status=401 request_id=unauthorized.req"),
+              std::string::npos);
+    EXPECT_EQ(contents.find("Authorization"), std::string::npos);
+    EXPECT_EQ(contents.find("Bearer test-secret-key"), std::string::npos);
+    EXPECT_EQ(contents.find("test-secret-key"), std::string::npos);
+    EXPECT_EQ(contents.find("wrong-secret-key"), std::string::npos);
+    EXPECT_EQ(contents.find("DEVMANAGER_API_KEY"), std::string::npos);
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    ASSERT_FALSE(error) << "Failed to remove logger test directory: " << error.message();
+}

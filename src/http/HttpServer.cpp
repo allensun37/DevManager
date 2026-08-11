@@ -80,7 +80,7 @@ void HttpServer::bind() {
                 HttpError{401, "unauthorized", "authentication required"}.toJson().dump(),
                 "application/json");
             if (logger_ != nullptr) {
-                logger_->warn("HTTP auth method=" + request.method +
+                logger_->warn("HTTP unauthorized method=" + request.method +
                               " path=" + request.path + " status=401 request_id=" +
                               requestId);
             }
