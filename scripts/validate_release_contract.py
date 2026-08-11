@@ -59,7 +59,7 @@ def main() -> int:
         "C++17",
         "DEVMANAGER_API_KEY",
         "Authorization: Bearer <API_KEY>",
-        "/health does not require an API key",
+        "`/health` does not require an API key",
         "HTTP startup fails",
         "401 unauthorized",
         "v0.5 pagination and error contracts remain unchanged",

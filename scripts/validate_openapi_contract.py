@@ -55,11 +55,53 @@ REQUIRED_MARKERS = (
     "unauthorized",
 )
 
+PROTECTED_OPERATIONS = (
+    ("/api/projects", "get"),
+    ("/api/projects", "post"),
+    ("/api/projects/{id}", "put"),
+    ("/api/projects/{id}", "delete"),
+    ("/api/info", "get"),
+    ("/api/statistics", "get"),
+)
+
 
 def require_pattern(contents: str, pattern: str, label: str) -> str | None:
     if re.search(pattern, contents, flags=re.DOTALL) is None:
         return label
     return None
+
+
+def operation_block(contents: str, path: str, method: str) -> str | None:
+    pattern = (
+        rf"^\s{{2}}{re.escape(path)}:\s*\n"
+        rf"(?:(?!^\s{{2}}/\S).)*?"
+        rf"^\s{{4}}{re.escape(method)}:\s*\n"
+        rf"(?P<operation>.*?)(?=^\s{{4}}(?:get|post|put|delete):\s|\Z)"
+    )
+    match = re.search(pattern, contents, flags=re.DOTALL | re.MULTILINE)
+    return match.group("operation") if match is not None else None
+
+
+def validate_protected_operations(contents: str) -> list[str]:
+    missing: list[str] = []
+    for path, method in PROTECTED_OPERATIONS:
+        label = f"{method.upper()} {path}"
+        operation = operation_block(contents, path, method)
+        if operation is None:
+            missing.append(f"{label} operation")
+            continue
+        if re.search(
+            r"^\s{6}security:\s*\n\s*-\s+bearerApiKey:\s*\[\]",
+            operation,
+            flags=re.MULTILINE,
+        ) is None:
+            missing.append(f"{label} bearer security")
+        if re.search(
+            r"'401':\s*\n\s+\$ref:\s*'#/components/responses/Unauthorized'",
+            operation,
+        ) is None:
+            missing.append(f"{label} 401 Unauthorized response")
+    return missing
 
 
 def main() -> int:
@@ -115,6 +157,7 @@ def main() -> int:
         )
         if marker is not None
     )
+    missing.extend(validate_protected_operations(contents))
     if missing:
         print("OpenAPI contract is incomplete; missing markers:", file=sys.stderr)
         for marker in missing:

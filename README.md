@@ -12,6 +12,28 @@ DevManager 是一个使用 C++17 和 CMake 构建的本地项目管理工具，�
 
 版本只有一个来源：CMake 的 `project(DevManager VERSION 0.5.0 LANGUAGES C CXX)`。构建时由 CMake 生成 `DevManagerVersion.h`；运行时 `/api/info` 和测试读取生成值，代码中不手写版本号。
 
+## HTTP API Key 认证（v0.6）
+
+HTTP 服务使用单个本地 API Key。启动前设置 `DEVMANAGER_API_KEY` 环境变量；HTTP startup fails（环境变量缺失、为空或不可用时进程以非零状态退出，并且不会监听端口）。CLI 不读取此变量，仍可直接使用。
+
+受保护的 HTTP 接口必须发送精确格式的 `Authorization: Bearer <API_KEY>` 请求头。认证失败统一返回 `401 unauthorized`、`WWW-Authenticate: Bearer` 和原有 JSON 错误结构；真实 API Key 不会写入响应或日志。
+
+PowerShell 示例：
+
+```powershell
+$env:DEVMANAGER_API_KEY = "local-dev-key"
+.\build-v05-final\devmanager_http.exe
+```
+
+请求示例：
+
+```powershell
+curl.exe -H "Authorization: Bearer local-dev-key" http://127.0.0.1:8080/api/projects
+curl.exe http://127.0.0.1:8080/health
+```
+
+`/health` does not require an API key，便于健康探针访问。v0.5 pagination and error contracts remain unchanged；分页参数和响应头继续遵循 [`docs/openapi.yaml`](docs/openapi.yaml)。请勿把真实 Key 写入源代码、README、日志或 Git 提交。
+
 ## 配置
 
 程序从当前工作目录的 `config/devmanager.json` 读取配置。文件缺失时使用以下 JSON 默认配置（JSON 后端）：

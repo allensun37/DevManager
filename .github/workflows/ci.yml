@@ -46,5 +46,8 @@ jobs:
       - name: Build
         run: cmake --build build --config Debug
 
+      - name: Verify HTTP startup rejects missing API key
+        run: python scripts/check_http_auth_startup.py
+
       - name: Test
         run: ctest --test-dir build -C Debug --output-on-failure
