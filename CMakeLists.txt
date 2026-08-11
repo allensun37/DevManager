@@ -436,6 +436,7 @@ target_link_libraries(DevManagerHttp PUBLIC
     DevManagerApplication
     DevManagerRepository
     DevManagerCommon
+    DevManagerAuth
     CppHttplib
 )
 

@@ -3,6 +3,7 @@
 #include "DevManagerVersion.h"
 #include "config/Config.h"
 #include "http/HttpServer.h"
+#include "infrastructure/auth/ApiKeyAuthenticator.h"
 #include "infrastructure/logging/Logger.h"
 #include "repository/RepositoryFactory.h"
 
@@ -96,7 +97,9 @@ public:
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::seconds(2);
         while (std::chrono::steady_clock::now() < deadline) {
-            if (client.Get("/api/projects")) {
+            const auto result = client.Get(
+                "/health", httplib::Headers{{"X-Request-ID", "readiness-probe"}});
+            if (result && result->status == 200) {
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -112,6 +115,7 @@ private:
 httplib::Result get(devmanager::HttpServer& server, const std::string& path) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     return client.Get(path);
 }
 
@@ -119,6 +123,7 @@ httplib::Result postJson(devmanager::HttpServer& server,
                          const std::string& body) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     return client.Post("/api/projects", body, "application/json");
 }
 
@@ -143,17 +148,70 @@ bool isValidRequestId(const std::string& value) {
 TEST(HttpServerIntegrationTest, BindsDynamicPortAndStopsCleanly) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
 
     EXPECT_GT(server.boundPort(), 0U);
     EXPECT_TRUE(running.waitUntilReady());
 }
 
+TEST(HttpServerIntegrationTest, ProtectedProjectListRequiresApiKeyAtPreRoutingBoundary) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    const auto unauthorized = client.Get("/api/projects");
+    ASSERT_TRUE(unauthorized);
+    EXPECT_EQ(unauthorized->status, 401);
+    EXPECT_EQ(unauthorized->get_header_value("WWW-Authenticate"), "Bearer");
+    EXPECT_EQ(nlohmann::json::parse(unauthorized->body),
+              (nlohmann::json{{"error", {{"code", "unauthorized"},
+                                            {"message", "authentication required"}}}}));
+
+    const auto authorized = client.Get("/api/projects", httplib::Headers{{
+        "Authorization", "Bearer test-key"}});
+    ASSERT_TRUE(authorized);
+    EXPECT_EQ(authorized->status, 200);
+
+    const auto unknown = client.Get("/api/projects/1/extra");
+    ASSERT_TRUE(unknown);
+    EXPECT_EQ(unknown->status, 404);
+}
+
+TEST(HttpServerIntegrationTest, UnauthorizedResponseKeepsPreRoutingRequestId) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    std::atomic_size_t generatedIds{0};
+    devmanager::HttpServer server(
+        service, authenticator, "127.0.0.1", 0,
+        [&generatedIds]() {
+            return "generated-" + std::to_string(generatedIds.fetch_add(1) + 1);
+        });
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_connection_timeout(0, 100000);
+    const auto response = client.Get("/api/projects");
+
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response->status, 401);
+    EXPECT_EQ(response->get_header_value("X-Request-ID"), "generated-1");
+    EXPECT_EQ(generatedIds.load(), 1U);
+}
+
 TEST(HttpServerIntegrationTest, EmptyProjectListReturnsJsonArray) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -172,7 +230,8 @@ TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPaginat
             devmanager::StorageConfig{devmanager::StorageType::Sqlite, databasePath});
         devmanager::ProjectManager manager(*repository);
         devmanager::ProjectService service(manager);
-        devmanager::HttpServer server(service, "127.0.0.1", 0);
+        const devmanager::ApiKeyAuthenticator authenticator("test-key");
+        devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
         RunningServer running(server);
         ASSERT_TRUE(running.waitUntilReady());
 
@@ -198,7 +257,8 @@ TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPaginat
             devmanager::StorageConfig{devmanager::StorageType::Sqlite, databasePath});
         devmanager::ProjectManager manager(*repository);
         devmanager::ProjectService service(manager);
-        devmanager::HttpServer server(service, "127.0.0.1", 0);
+        const devmanager::ApiKeyAuthenticator authenticator("test-key");
+        devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
         RunningServer running(server);
         ASSERT_TRUE(running.waitUntilReady());
 
@@ -218,11 +278,13 @@ TEST(HttpServerIntegrationTest, SQLitePersistenceSupportsHttpFilteringAndPaginat
 TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     httplib::Headers headers{{"X-Request-ID", "client.req-01"}};
     const auto response = client.Get("/health", headers);
 
@@ -236,7 +298,8 @@ TEST(HttpServerIntegrationTest, HealthReturnsOkAndPropagatesRequestId) {
 TEST(HttpServerIntegrationTest, InfoReturnsGeneratedVersion) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -255,7 +318,8 @@ TEST(HttpServerIntegrationTest, StatisticsReturnsNormalizedProjectCounts) {
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("One", {" C++ ", "c++", "CMake"}, "", " Active "), 1U);
     ASSERT_EQ(manager.addProject("Two", {"CMAKE", "Rust"}, "", "active"), 2U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -275,11 +339,13 @@ TEST(HttpServerIntegrationTest, StatisticsReturnsNormalizedProjectCounts) {
 TEST(HttpServerIntegrationTest, MissingOrInvalidRequestIdIsReplacedForSuccessAndNotFound) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     httplib::Headers invalid{{"X-Request-ID", "bad id with spaces"}};
     const auto success = client.Get("/health", invalid);
     ASSERT_TRUE(success);
@@ -296,11 +362,13 @@ TEST(HttpServerIntegrationTest, MissingOrInvalidRequestIdIsReplacedForSuccessAnd
 TEST(HttpServerIntegrationTest, DeleteMissingProjectReturnsNotFoundError) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     const auto response = client.Delete("/api/projects/99");
 
     ASSERT_TRUE(response);
@@ -313,11 +381,13 @@ TEST(HttpServerIntegrationTest, DeleteMissingProjectReturnsNotFoundError) {
 TEST(HttpServerIntegrationTest, DeleteInvalidProjectIdReturnsBadRequest) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     const auto response = client.Delete("/api/projects/not-an-id");
 
     ASSERT_TRUE(response);
@@ -330,7 +400,8 @@ TEST(HttpServerIntegrationTest, DeleteInvalidProjectIdReturnsBadRequest) {
 TEST(HttpServerIntegrationTest, ConcurrentCreatesProduceUniqueIds) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -380,11 +451,13 @@ TEST(HttpServerIntegrationTest, LogsStartupAndHttpErrorsThroughInjectedLogger) {
         devmanager::Logger logger(logPath, "info");
         devmanager::ProjectManager manager;
         devmanager::ProjectService service(manager);
-        devmanager::HttpServer server(service, logger, "127.0.0.1", 0);
+        const devmanager::ApiKeyAuthenticator authenticator("test-key");
+        devmanager::HttpServer server(service, logger, authenticator, "127.0.0.1", 0);
         RunningServer running(server);
         ASSERT_TRUE(running.waitUntilReady());
 
         httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+        client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
         httplib::Headers headers{{"X-Request-ID", "logged.req"}};
         const auto response = client.Get("/unknown", headers);
         ASSERT_TRUE(response);
