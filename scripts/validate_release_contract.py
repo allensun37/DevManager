@@ -57,6 +57,12 @@ def main() -> int:
         "X-Request-ID",
         "ctest --test-dir build-v05-final -C Debug --output-on-failure",
         "C++17",
+        "DEVMANAGER_API_KEY",
+        "Authorization: Bearer <API_KEY>",
+        "/health does not require an API key",
+        "HTTP startup fails",
+        "401 unauthorized",
+        "v0.5 pagination and error contracts remain unchanged",
     ):
         require(readme, marker, "README.md")
 

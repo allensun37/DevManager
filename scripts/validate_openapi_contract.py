@@ -47,6 +47,12 @@ REQUIRED_MARKERS = (
     "At most one of name, technology, and status",
     "JSON/SQLite",
     "not an items/total envelope",
+    "securitySchemes:",
+    "bearerApiKey:",
+    "scheme: bearer",
+    "DEVMANAGER_API_KEY",
+    "WWW-Authenticate",
+    "unauthorized",
 )
 
 
@@ -95,6 +101,16 @@ def main() -> int:
                 r"headers:\s*\n.*?X-Total-Count:.*?"
                 r"X-Page:.*?X-Page-Size:",
                 "GET /api/projects pagination response headers",
+            ),
+            require_pattern(
+                contents,
+                r"/api/projects:\s*\n\s+get:.*?security:\s*\n\s+- bearerApiKey:",
+                "GET /api/projects bearer security",
+            ),
+            require_pattern(
+                contents,
+                r"/api/projects:\s*\n\s+get:.*?responses:.*?'401':\s*\n\s+\$ref: '#/components/responses/Unauthorized'",
+                "GET /api/projects 401 unauthorized response",
             ),
         )
         if marker is not None
