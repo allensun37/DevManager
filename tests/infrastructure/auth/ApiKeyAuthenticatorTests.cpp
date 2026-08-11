@@ -1,5 +1,6 @@
 #include "infrastructure/auth/ApiKeyAuthenticator.h"
 
+#include <stdexcept>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -25,4 +26,8 @@ TEST(ApiKeyAuthenticatorTests, RejectsMissingHeaderAndMalformedBearerForms) {
 TEST(ApiKeyAuthenticatorTests, RejectsWrongKey) {
     const devmanager::ApiKeyAuthenticator authenticator("test-key");
     EXPECT_FALSE(authenticator.authenticate("Bearer wrong-key"));
+}
+
+TEST(ApiKeyAuthenticatorTests, RejectsEmptyConfiguredKey) {
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator(""), std::invalid_argument);
 }

@@ -439,9 +439,12 @@ target_link_libraries(DevManagerHttp PUBLIC
     CppHttplib
 )
 
-# API-key authentication contract (implementation is introduced in the next TDD step).
-add_library(DevManagerAuth INTERFACE)
-target_include_directories(DevManagerAuth INTERFACE
+# API-key authentication infrastructure.
+add_library(DevManagerAuth STATIC
+    src/infrastructure/auth/EnvironmentApiKeyProvider.cpp
+    src/infrastructure/auth/ApiKeyAuthenticator.cpp
+)
+target_include_directories(DevManagerAuth PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
