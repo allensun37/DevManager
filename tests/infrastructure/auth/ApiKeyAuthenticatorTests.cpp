@@ -31,3 +31,11 @@ TEST(ApiKeyAuthenticatorTests, RejectsWrongKey) {
 TEST(ApiKeyAuthenticatorTests, RejectsEmptyConfiguredKey) {
     EXPECT_THROW((void)devmanager::ApiKeyAuthenticator(""), std::invalid_argument);
 }
+
+TEST(ApiKeyAuthenticatorTests, RejectsConfiguredKeyWithBoundaryWhitespace) {
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator(" test-key"), std::invalid_argument);
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator("test-key "), std::invalid_argument);
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator("\ttest-key"), std::invalid_argument);
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator("test-key\n"), std::invalid_argument);
+    EXPECT_THROW((void)devmanager::ApiKeyAuthenticator(" \t\n"), std::invalid_argument);
+}

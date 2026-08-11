@@ -16,8 +16,10 @@ bool isAsciiWhitespace(char value) noexcept {
 
 ApiKeyAuthenticator::ApiKeyAuthenticator(std::string expectedKey)
     : expectedKey_(std::move(expectedKey)) {
-    if (expectedKey_.empty()) {
-        throw std::invalid_argument("expected API key must not be empty");
+    if (expectedKey_.empty() || isAsciiWhitespace(expectedKey_.front()) ||
+        isAsciiWhitespace(expectedKey_.back())) {
+        throw std::invalid_argument(
+            "expected API key must not be empty or have boundary whitespace");
     }
 }
 
