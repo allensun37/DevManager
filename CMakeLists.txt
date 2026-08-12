@@ -149,6 +149,12 @@ target_include_directories(DevManagerLogger PUBLIC
 )
 target_link_libraries(DevManagerLogger PUBLIC spdlog::spdlog)
 
+add_library(DevManagerRuntime src/infrastructure/runtime/SignalHandler.cpp)
+target_include_directories(DevManagerRuntime PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(DevManagerRuntime PUBLIC DevManagerApplication)
+
 add_library(DevManagerDomain src/domain/Project.cpp)
 target_include_directories(DevManagerDomain PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -362,6 +368,15 @@ target_link_libraries(DevManagerServiceLifecycleTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerServiceLifecycleTests)
+
+add_executable(DevManagerSignalHandlerTests
+    tests/infrastructure/runtime/SignalHandlerTests.cpp
+)
+target_link_libraries(DevManagerSignalHandlerTests PRIVATE
+    DevManagerRuntime
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerSignalHandlerTests)
 
 add_executable(DevManagerLoggerTests
     tests/infrastructure/LoggerTests.cpp
