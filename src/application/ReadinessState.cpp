@@ -11,7 +11,8 @@ bool ReadinessState::isReady() const noexcept {
 }
 
 void ReadinessState::markReady() noexcept {
-    transitionTo(ServiceState::Ready);
+    ServiceState expected = ServiceState::Starting;
+    static_cast<void>(state_.compare_exchange_strong(expected, ServiceState::Ready));
 }
 
 void ReadinessState::markStopping() noexcept {

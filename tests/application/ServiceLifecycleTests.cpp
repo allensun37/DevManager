@@ -190,6 +190,21 @@ TEST_F(ServiceLifecycleTest, MarksFailureWithoutTouchingRuntime) {
     EXPECT_EQ(runtime.waitCalls, 0U);
 }
 
+TEST_F(ServiceLifecycleTest, FailedLifecycleDoesNotStartShutdownWork) {
+    devmanager::ReadinessState readiness;
+    FakeStopSource stopSource;
+    FakeRuntime runtime;
+    devmanager::ServiceLifecycle lifecycle(readiness, stopSource, runtime, *logger);
+
+    EXPECT_EQ(lifecycle.markFailed(), devmanager::ServiceExit::Failed);
+    stopSource.stop = true;
+
+    EXPECT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::Failed);
+    EXPECT_EQ(runtime.stopCalls, 0U);
+    EXPECT_EQ(runtime.waitCalls, 0U);
+    EXPECT_EQ(readiness.state(), devmanager::ServiceState::Failed);
+}
+
 TEST_F(ServiceLifecycleTest, DoesNotReportFailureAfterSuccessfulStop) {
     devmanager::ReadinessState readiness;
     FakeStopSource stopSource;
@@ -215,6 +230,21 @@ TEST_F(ServiceLifecycleTest, DoesNotStopAcceptingTwice) {
 
     EXPECT_EQ(runtime.stopCalls, 1U);
     EXPECT_EQ(runtime.waitCalls, 1U);
+}
+
+TEST_F(ServiceLifecycleTest, LogsNormalShutdownReasonWithoutSensitiveContent) {
+    devmanager::ReadinessState readiness;
+    FakeStopSource stopSource;
+    FakeRuntime runtime;
+    stopSource.stop = true;
+    devmanager::ServiceLifecycle lifecycle(readiness, stopSource, runtime, *logger);
+
+    EXPECT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::Stopped);
+
+    const std::string contents = readFile(logPath);
+    EXPECT_NE(contents.find("shutdown_requested"), std::string::npos);
+    EXPECT_EQ(contents.find("Authorization"), std::string::npos);
+    EXPECT_EQ(contents.find("test-api-key"), std::string::npos);
 }
 
 }  // namespace

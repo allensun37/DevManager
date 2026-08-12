@@ -20,6 +20,9 @@ void ServiceLifecycle::markReady() noexcept {
 }
 
 ServiceExit ServiceLifecycle::stopWhenRequested() {
+    if (readiness_.state() == ServiceState::Failed) {
+        return ServiceExit::Failed;
+    }
     if (stoppingStarted_) {
         return stoppingResult_;
     }
@@ -30,6 +33,7 @@ ServiceExit ServiceLifecycle::stopWhenRequested() {
     stoppingStarted_ = true;
     readiness_.markStopping();
     runtime_.stopAccepting();
+    logger_.info("shutdown_requested");
 
     if (stopSource_.forceStopRequested()) {
         logger_.warn("shutdown_force_requested");

@@ -35,6 +35,17 @@ TEST(ReadinessStateTest, StoppingAndFailureAreNotReady) {
     EXPECT_FALSE(state.isReady());
 }
 
+TEST(ReadinessStateTest, StoppingStateCannotBecomeReadyAgain) {
+    devmanager::ReadinessState state;
+
+    state.markReady();
+    state.markStopping();
+    state.markReady();
+
+    EXPECT_EQ(state.state(), devmanager::ServiceState::Stopping);
+    EXPECT_FALSE(state.isReady());
+}
+
 TEST(ReadinessStateTest, StoppedStateIsTerminal) {
     devmanager::ReadinessState state;
 
