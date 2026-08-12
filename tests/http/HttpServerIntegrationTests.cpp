@@ -1,5 +1,6 @@
 #include "application/ProjectManager.h"
 #include "application/ProjectService.h"
+#include "application/ReadinessState.h"
 #include "DevManagerVersion.h"
 #include "config/Config.h"
 #include "http/HttpServer.h"
@@ -154,6 +155,57 @@ TEST(HttpServerIntegrationTest, BindsDynamicPortAndStopsCleanly) {
 
     EXPECT_GT(server.boundPort(), 0U);
     EXPECT_TRUE(running.waitUntilReady());
+}
+
+TEST(HttpServerIntegrationTest, ReadyReportsLifecycleStateWithoutAuthentication) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    devmanager::ReadinessState readiness;
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, readiness, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    const auto starting = client.Get("/ready", httplib::Headers{{"X-Request-ID", "starting"}});
+    ASSERT_TRUE(starting);
+    EXPECT_EQ(starting->status, 503);
+    EXPECT_EQ(starting->get_header_value("X-Request-ID"), "starting");
+    EXPECT_EQ(nlohmann::json::parse(starting->body)["error"]["code"], "not_ready");
+
+    readiness.markReady();
+    const auto ready = client.Get("/ready");
+    ASSERT_TRUE(ready);
+    EXPECT_EQ(ready->status, 200);
+    EXPECT_EQ(nlohmann::json::parse(ready->body)["status"], "ready");
+    EXPECT_TRUE(isValidRequestId(ready->get_header_value("X-Request-ID")));
+
+    readiness.markStopping();
+    const auto stopping = client.Get("/ready");
+    ASSERT_TRUE(stopping);
+    EXPECT_EQ(stopping->status, 503);
+}
+
+TEST(HttpServerIntegrationTest, RejectsPayloadLargerThanOneMiBBeforeProjectCreation) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
+    RunningServer running(server);
+    ASSERT_TRUE(running.waitUntilReady());
+
+    const std::string oversizedPayload(1024U * 1024U + 1U, 'x');
+    const auto oversized = postJson(server, oversizedPayload);
+    ASSERT_TRUE(oversized);
+    EXPECT_EQ(oversized->status, 413);
+    EXPECT_EQ(nlohmann::json::parse(oversized->body)["error"]["code"], "payload_too_large");
+    EXPECT_TRUE(isValidRequestId(oversized->get_header_value("X-Request-ID")));
+    EXPECT_TRUE(service.listProjects().empty());
+
+    const std::string oneMiBPayload(1024U * 1024U, 'x');
+    const auto exactLimit = postJson(server, oneMiBPayload);
+    ASSERT_TRUE(exactLimit);
+    EXPECT_NE(exactLimit->status, 413);
 }
 
 TEST(HttpServerIntegrationTest, ProtectedProjectListRequiresApiKeyAtPreRoutingBoundary) {

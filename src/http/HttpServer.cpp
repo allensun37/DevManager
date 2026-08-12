@@ -40,6 +40,16 @@ HttpServer::HttpServer(ProjectService& service,
       controller_(service_, logger_, requestIdGenerator_) {}
 
 HttpServer::HttpServer(ProjectService& service,
+                       const ApiKeyAuthenticator& authenticator,
+                       ReadinessState& readiness,
+                       std::string host,
+                       std::uint16_t port,
+                       RequestIdGenerator requestIdGenerator)
+    : HttpServer(service, authenticator, std::move(host), port, std::move(requestIdGenerator)) {
+    readiness_ = &readiness;
+}
+
+HttpServer::HttpServer(ProjectService& service,
                        Logger& logger,
                        const ApiKeyAuthenticator& authenticator,
                        std::string host,
@@ -53,12 +63,39 @@ HttpServer::HttpServer(ProjectService& service,
       requestIdGenerator_(std::move(requestIdGenerator)),
       controller_(service_, logger_, requestIdGenerator_) {}
 
+HttpServer::HttpServer(ProjectService& service,
+                       Logger& logger,
+                       const ApiKeyAuthenticator& authenticator,
+                       ReadinessState& readiness,
+                       std::string host,
+                       std::uint16_t port,
+                       RequestIdGenerator requestIdGenerator)
+    : HttpServer(service, logger, authenticator, std::move(host), port,
+                 std::move(requestIdGenerator)) {
+    readiness_ = &readiness;
+}
+
 void HttpServer::bind() {
     if (bound_) {
         throw std::logic_error("HTTP server is already bound");
     }
 
+    server_.set_payload_max_length(1024U * 1024U);
     controller_.registerRoutes(server_);
+    server_.Get("/ready", [this](const httplib::Request& request, httplib::Response& response) {
+        const std::string candidate = request.has_header("X-Request-ID")
+                                          ? request.get_header_value("X-Request-ID")
+                                          : std::string{};
+        response.set_header("X-Request-ID", request_id::resolve(candidate, requestIdGenerator_));
+        if (readiness_ != nullptr && readiness_->isReady()) {
+            response.status = 200;
+            response.set_content("{\"status\":\"ready\"}", "application/json");
+            return;
+        }
+        response.status = 503;
+        response.set_content(HttpError{503, "not_ready", "service is not ready"}.toJson().dump(),
+                             "application/json");
+    });
     server_.set_pre_routing_handler(
         [this](const httplib::Request& request, httplib::Response& response) {
             if (!requiresAuthentication(request.path) ||
@@ -95,6 +132,11 @@ void HttpServer::bind() {
                                                  : std::string{});
         const std::string requestId = request_id::resolve(candidate, requestIdGenerator_);
         response.set_header("X-Request-ID", requestId);
+        if (response.status == 413) {
+            response.set_content(
+                HttpError{413, "payload_too_large", "request payload exceeds 1 MiB"}.toJson().dump(),
+                "application/json");
+        }
         if (logger_ != nullptr) {
             logger_->error("HTTP error method=" + request.method +
                            " path=" + request.path +
