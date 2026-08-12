@@ -168,6 +168,7 @@ add_library(DevManagerApplication
     src/application/ProjectManager.cpp
     src/application/ApplicationBootstrap.cpp
     src/application/ProjectService.cpp
+    src/application/ReadinessState.cpp
 )
 target_include_directories(DevManagerApplication PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -342,6 +343,15 @@ target_link_libraries(DevManagerApplicationBootstrapTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerApplicationBootstrapTests)
+
+add_executable(DevManagerReadinessStateTests
+    tests/application/ReadinessStateTests.cpp
+)
+target_link_libraries(DevManagerReadinessStateTests PRIVATE
+    DevManagerApplication
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerReadinessStateTests)
 
 add_executable(DevManagerLoggerTests
     tests/infrastructure/LoggerTests.cpp
