@@ -2,6 +2,7 @@
 #include "application/ProjectService.h"
 #include "http/HttpServer.h"
 #include "http/ProjectHttpController.h"
+#include "infrastructure/auth/ApiKeyAuthenticator.h"
 #include "query/ProjectQueryEvaluator.h"
 #include "repository/ProjectRepository.h"
 
@@ -45,7 +46,7 @@ public:
         const auto deadline = std::chrono::steady_clock::now() +
                               std::chrono::seconds(2);
         while (std::chrono::steady_clock::now() < deadline) {
-            if (client.Get("/api/projects")) {
+            if (client.Get("/health")) {
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -61,6 +62,7 @@ private:
 httplib::Result get(devmanager::HttpServer& server, const std::string& path) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     client.set_path_encode(false);
     return client.Get(path);
 }
@@ -69,6 +71,7 @@ httplib::Result postJson(devmanager::HttpServer& server,
                          const std::string& body) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     return client.Post("/api/projects", body, "application/json");
 }
 
@@ -77,6 +80,7 @@ httplib::Result putJson(devmanager::HttpServer& server,
                         const std::string& body) {
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
     client.set_connection_timeout(0, 100000);
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     return client.Put(path, body, "application/json");
 }
 
@@ -207,7 +211,8 @@ TEST(ProjectHttpControllerTest, ListsAllProjectsWhenNoQueryIsPresent) {
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "last", "active"), 1U);
     ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "first", "planned"), 2U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -232,7 +237,8 @@ TEST(ProjectHttpControllerTest, PaginatesWithCompatibleArrayBodyAndHeaders) {
     ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "", "planned"), 2U);
     ASSERT_EQ(manager.addProject("Beta", {"Rust"}, "", "active"), 3U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -252,7 +258,8 @@ TEST(ProjectHttpControllerTest, PaginatesWithCompatibleArrayBodyAndHeaders) {
 TEST(ProjectHttpControllerTest, RejectsMalformedPagingValues) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -272,7 +279,8 @@ TEST(ProjectHttpControllerTest, ReturnsEmptyPagePastEndWithAccurateHeaders) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Only", {"C++"}, "", "active"), 1U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -291,7 +299,8 @@ TEST(ProjectHttpControllerTest, AllowsSortWithoutAFilter) {
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Zeta", {"C++"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Alpha", {"CMake"}, "", "planned"), 2U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -312,7 +321,8 @@ TEST(ProjectHttpControllerTest, SearchesByNameOrTechnology) {
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("DevManager", {"C++", "CMake"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Website", {"React"}, "", "planned"), 2U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -340,7 +350,8 @@ TEST(ProjectHttpControllerTest, FiltersByStatus) {
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("One", {"C++"}, "", "active"), 1U);
     ASSERT_EQ(manager.addProject("Two", {"CMake"}, "", "planned"), 2U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -358,7 +369,8 @@ TEST(ProjectHttpControllerTest, FiltersByStatus) {
 TEST(ProjectHttpControllerTest, RejectsMultipleFilterParameters) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -374,7 +386,8 @@ TEST(ProjectHttpControllerTest, RejectsMultipleFilterParameters) {
 TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -433,7 +446,8 @@ TEST(ProjectHttpControllerTest, RejectsUnknownAndRepeatedQueryParameters) {
 TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -449,7 +463,8 @@ TEST(ProjectHttpControllerTest, RejectsInvalidSortKey) {
 TEST(ProjectHttpControllerTest, CreatesProjectAndReturns201) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -469,7 +484,8 @@ TEST(ProjectHttpControllerTest, CreatesProjectAndReturns201) {
 TEST(ProjectHttpControllerTest, RejectsMalformedJsonAndInvalidFields) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -500,7 +516,8 @@ TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("Before", {"C++"}, "old", "planned"), 1U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -523,7 +540,8 @@ TEST(ProjectHttpControllerTest, UpdatesAllEditableFieldsAndPreservesId) {
 TEST(ProjectHttpControllerTest, UpdatesMissingProjectAndReturns404) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -543,11 +561,13 @@ TEST(ProjectHttpControllerTest, DeletesProjectAndReturns204) {
     devmanager::ProjectManager manager;
     devmanager::ProjectService service(manager);
     ASSERT_EQ(manager.addProject("DevManager", {"C++"}, "project", "active"), 1U);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
     httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+    client.set_default_headers(httplib::Headers{{"Authorization", "Bearer test-key"}});
     const auto response = client.Delete("/api/projects/1");
 
     ASSERT_TRUE(response);
@@ -561,7 +581,8 @@ TEST(ProjectHttpControllerTest, MapsSaveFailureToPersistenceFailureAndRollsBack)
     repository.setFailSaves(true);
     devmanager::ProjectManager manager(repository);
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 
@@ -595,7 +616,8 @@ TEST(ProjectHttpControllerTest, MapsIdExhaustionToConflict) {
         {devmanager::Project{penultimateId, "Existing", {"C++"}, "", "active"}}});
     devmanager::ProjectManager manager(repository);
     devmanager::ProjectService service(manager);
-    devmanager::HttpServer server(service, "127.0.0.1", 0);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
     RunningServer running(server);
     ASSERT_TRUE(running.waitUntilReady());
 

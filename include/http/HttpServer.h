@@ -2,6 +2,7 @@
 
 #include "http/ProjectHttpController.h"
 #include "http/RequestId.h"
+#include "infrastructure/auth/ApiKeyAuthenticator.h"
 #include "infrastructure/logging/Logger.h"
 
 #include <httplib.h>
@@ -14,11 +15,13 @@ namespace devmanager {
 class HttpServer final {
 public:
     HttpServer(ProjectService& service,
+               const ApiKeyAuthenticator& authenticator,
                std::string host,
                std::uint16_t port,
                RequestIdGenerator requestIdGenerator = {});
     HttpServer(ProjectService& service,
                Logger& logger,
+               const ApiKeyAuthenticator& authenticator,
                std::string host,
                std::uint16_t port,
                RequestIdGenerator requestIdGenerator = {});
@@ -31,6 +34,7 @@ public:
 private:
     ProjectService& service_;
     Logger* logger_;
+    const ApiKeyAuthenticator& authenticator_;
     std::string host_;
     std::uint16_t requestedPort_;
     std::uint16_t boundPort_ {0};

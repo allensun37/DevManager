@@ -6,5 +6,5 @@
 
 TEST(DevManagerVersionTest, ExposesTheCMakeProjectVersion) {
     EXPECT_FALSE(std::string{devmanager::kDevManagerVersion}.empty());
-    EXPECT_STREQ(devmanager::kDevManagerVersion, "0.5.0");
+    EXPECT_STREQ(devmanager::kDevManagerVersion, "0.6.0");
 }

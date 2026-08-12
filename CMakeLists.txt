@@ -4,7 +4,7 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-project(DevManager VERSION 0.5.0 LANGUAGES C CXX)
+project(DevManager VERSION 0.6.0 LANGUAGES C CXX)
 
 set(DEVMANAGER_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${DEVMANAGER_GENERATED_INCLUDE_DIR}")
@@ -436,8 +436,28 @@ target_link_libraries(DevManagerHttp PUBLIC
     DevManagerApplication
     DevManagerRepository
     DevManagerCommon
+    DevManagerAuth
     CppHttplib
 )
+
+# API-key authentication infrastructure.
+add_library(DevManagerAuth STATIC
+    src/infrastructure/auth/EnvironmentApiKeyProvider.cpp
+    src/infrastructure/auth/ApiKeyAuthenticator.cpp
+)
+target_include_directories(DevManagerAuth PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(DevManagerApiKeyAuthTests
+    tests/infrastructure/auth/EnvironmentApiKeyProviderTests.cpp
+    tests/infrastructure/auth/ApiKeyAuthenticatorTests.cpp
+)
+target_link_libraries(DevManagerApiKeyAuthTests PRIVATE
+    DevManagerAuth
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerApiKeyAuthTests)
 
 add_executable(DevManagerProjectHttpJsonMapperTests
     tests/http/ProjectHttpJsonMapperTests.cpp
