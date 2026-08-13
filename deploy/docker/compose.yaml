@@ -7,7 +7,7 @@ services:
     environment:
       DEVMANAGER_API_KEY: ${DEVMANAGER_API_KEY:?Set DEVMANAGER_API_KEY in deploy/docker/.env}
     ports:
-      - "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080"
+      - "127.0.0.1:${DEVMANAGER_PORT}:8080"
     volumes:
       - devmanager-data:/var/lib/devmanager
       - devmanager-logs:/var/log/devmanager

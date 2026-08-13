@@ -79,7 +79,7 @@ def main() -> int:
         "v0.8 通过真实已认证 in-flight 请求验证优雅停止期间的安全 drain",
         "Docker Compose 部署（v0.9）",
         "docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml up -d --build",
-        "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080",
+        "127.0.0.1:${DEVMANAGER_PORT}:8080",
         "devmanager-data",
         "docker compose down -v",
     ):

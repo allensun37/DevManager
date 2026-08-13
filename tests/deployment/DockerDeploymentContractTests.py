@@ -50,7 +50,7 @@ def main() -> int:
     compose = require_file(ROOT / "deploy" / "docker" / "compose.yaml")
     for required_fragment in (
         "devmanager:",
-        "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080",
+        "127.0.0.1:${DEVMANAGER_PORT}:8080",
         "DEVMANAGER_API_KEY: ${DEVMANAGER_API_KEY:?Set DEVMANAGER_API_KEY in deploy/docker/.env}",
         "restart: unless-stopped",
         "init: true",
@@ -81,9 +81,22 @@ def main() -> int:
         "/health",
         "/ready",
         "/api/projects",
+        '["port", "devmanager", "8080"]',
+        '"inspect",',
+        "/var/log/devmanager/devmanager.log",
+        "timeout_seconds",
+        "ProxyHandler({})",
     ):
         if required_fragment not in smoke:
             raise AssertionError(f"Docker Compose smoke script must contain {required_fragment!r}")
+    if smoke.count("port = published_loopback_port(compose)") < 2:
+        raise AssertionError("Docker Compose smoke script must resolve the published port again after restart")
+    if 'check=False,\n                    timeout_seconds=60,' in smoke:
+        raise AssertionError("Docker Compose smoke script must not ignore isolated project cleanup failures")
+    if "cleanup_failure" not in smoke:
+        raise AssertionError("Docker Compose smoke script must report cleanup failure without hiding a prior failure")
+    if "except Exception as error:" not in smoke:
+        raise AssertionError("Docker Compose smoke script must preserve a primary failure when Docker cleanup raises")
 
     workflow = require_file(ROOT / ".github" / "workflows" / "ci.yml")
     for required_fragment in (

@@ -103,7 +103,7 @@ curl.exe http://127.0.0.1:8080/health
 curl.exe -H "Authorization: Bearer <API_KEY>" http://127.0.0.1:8080/api/projects
 ```
 
-Compose 在容器内监听 `0.0.0.0:8080`，但 host 映射固定为 `127.0.0.1:${DEVMANAGER_PORT:-8080}:8080`，不会默认暴露给局域网或公网。`/ready` 是容器 healthcheck，只有配置、SQLite migration、路由和认证初始化完成后才为 healthy。
+Compose 在容器内监听 `0.0.0.0:8080`，Compose 模板使用 `127.0.0.1:${DEVMANAGER_PORT}:8080`；示例 `.env` 中的 `DEVMANAGER_PORT=8080` 会映射为 `127.0.0.1:8080:8080`，不会暴露给局域网或公网。将 `DEVMANAGER_PORT` 留空时，Docker 会选择一个随机的 loopback host 端口，可用 `docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml port devmanager 8080` 查询。`/ready` 是容器 healthcheck，只有配置、SQLite migration、路由和认证初始化完成后才为 healthy。
 
 SQLite 数据和文件日志分别保存在 `devmanager-data` 与 `devmanager-logs` named volumes 中，因此 `docker compose restart` 和不带 `-v` 的 `docker compose down` 都会保留数据。停止服务：
 
