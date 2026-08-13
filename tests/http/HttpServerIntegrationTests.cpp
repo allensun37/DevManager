@@ -171,7 +171,9 @@ TEST(HttpServerIntegrationTest, ReadyReportsLifecycleStateWithoutAuthentication)
     ASSERT_TRUE(starting);
     EXPECT_EQ(starting->status, 503);
     EXPECT_EQ(starting->get_header_value("X-Request-ID"), "starting");
-    EXPECT_EQ(nlohmann::json::parse(starting->body)["error"]["code"], "not_ready");
+    EXPECT_EQ(nlohmann::json::parse(starting->body),
+              (nlohmann::json{{"error", {{"code", "not_ready"},
+                                          {"message", "service is not ready"}}}}));
 
     readiness.markReady();
     const auto ready = client.Get("/ready");
@@ -181,9 +183,49 @@ TEST(HttpServerIntegrationTest, ReadyReportsLifecycleStateWithoutAuthentication)
     EXPECT_TRUE(isValidRequestId(ready->get_header_value("X-Request-ID")));
 
     readiness.markStopping();
-    const auto stopping = client.Get("/ready");
+    const auto stopping = client.Get("/ready", httplib::Headers{{"X-Request-ID", "stopping"}});
     ASSERT_TRUE(stopping);
     EXPECT_EQ(stopping->status, 503);
+    EXPECT_EQ(stopping->get_header_value("X-Request-ID"), "stopping");
+    EXPECT_EQ(nlohmann::json::parse(stopping->body),
+              (nlohmann::json{{"error", {{"code", "not_ready"},
+                                          {"message", "service is not ready"}}}}));
+}
+
+TEST(HttpServerIntegrationTest, LogsReadyProbeResponsesWithRequestIds) {
+    const std::filesystem::path directory = makeLoggerTestDirectory();
+    const std::filesystem::path logPath = directory / "server.log";
+    {
+        devmanager::ProjectManager manager;
+        devmanager::ProjectService service(manager);
+        devmanager::ReadinessState readiness;
+        devmanager::Logger logger(logPath, "debug");
+        const devmanager::ApiKeyAuthenticator authenticator("test-key");
+        devmanager::HttpServer server(
+            service, logger, authenticator, readiness, "127.0.0.1", 0);
+        RunningServer running(server);
+        ASSERT_TRUE(running.waitUntilReady());
+
+        httplib::Client client("127.0.0.1", static_cast<int>(server.boundPort()));
+        const auto notReady = client.Get("/ready", httplib::Headers{{"X-Request-ID", "not-ready"}});
+        ASSERT_TRUE(notReady);
+        EXPECT_EQ(notReady->status, 503);
+
+        readiness.markReady();
+        const auto ready = client.Get("/ready", httplib::Headers{{"X-Request-ID", "ready"}});
+        ASSERT_TRUE(ready);
+        EXPECT_EQ(ready->status, 200);
+    }
+
+    const std::string contents = readLoggerFile(logPath);
+    EXPECT_NE(contents.find("HTTP error method=GET path=/ready status=503 request_id=not-ready"),
+              std::string::npos);
+    EXPECT_NE(contents.find("HTTP request method=GET path=/ready status=200 request_id=ready"),
+              std::string::npos);
+
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    EXPECT_FALSE(error);
 }
 
 TEST(HttpServerIntegrationTest, RejectsPayloadLargerThanOneMiBBeforeProjectCreation) {

@@ -241,6 +241,7 @@ set_target_properties(DevManagerHttpServer PROPERTIES
 target_link_libraries(DevManagerHttpServer PRIVATE
     DevManagerHttp
     DevManagerRepository
+    DevManagerRuntime
 )
 
 enable_testing()
@@ -368,6 +369,15 @@ target_link_libraries(DevManagerServiceLifecycleTests PRIVATE
     GTest::gtest_main
 )
 gtest_discover_tests(DevManagerServiceLifecycleTests)
+
+add_executable(DevManagerServiceLifecycleIntegrationTests
+    tests/application/ServiceLifecycleIntegrationTests.cpp
+)
+target_link_libraries(DevManagerServiceLifecycleIntegrationTests PRIVATE
+    DevManagerHttp
+    GTest::gtest_main
+)
+gtest_discover_tests(DevManagerServiceLifecycleIntegrationTests)
 
 add_executable(DevManagerSignalHandlerTests
     tests/infrastructure/runtime/SignalHandlerTests.cpp

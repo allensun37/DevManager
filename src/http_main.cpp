@@ -1,9 +1,14 @@
 #include "application/ApplicationBootstrap.h"
+#include "application/ReadinessState.h"
+#include "application/ServiceLifecycle.h"
 #include "http/HttpServer.h"
 #include "infrastructure/auth/EnvironmentApiKeyProvider.h"
+#include "infrastructure/runtime/SignalHandler.h"
 
+#include <chrono>
 #include <exception>
 #include <iostream>
+#include <thread>
 
 int main() {
     try {
@@ -12,14 +17,27 @@ int main() {
         const devmanager::EnvironmentApiKeyProvider provider;
         const devmanager::ApiKeyAuthenticator authenticator(provider.load());
         devmanager::ApplicationBootstrap bootstrap(config);
+        devmanager::ReadinessState readiness;
+        devmanager::SignalHandler signals;
+        signals.install();
         devmanager::HttpServer server(bootstrap.service(),
                                       bootstrap.logger(),
                                       authenticator,
+                                      readiness,
                                       bootstrap.config().server.host,
                                       bootstrap.config().server.port);
+        devmanager::ServiceLifecycle lifecycle(
+            readiness, signals, server, bootstrap.logger());
         server.bind();
-        server.run();
-        return 0;
+        server.runAsync();
+        lifecycle.markReady();
+
+        while (!signals.stopRequested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        const devmanager::ServiceExit exit = lifecycle.stopWhenRequested();
+        return exit == devmanager::ServiceExit::Stopped ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << "DevManager HTTP error: " << error.what() << '\n';
         return 1;

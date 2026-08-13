@@ -1,6 +1,7 @@
 #include "http/HttpServer.h"
 #include "http/HttpError.h"
 
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -49,6 +50,11 @@ HttpServer::HttpServer(ProjectService& service,
     readiness_ = &readiness;
 }
 
+HttpServer::~HttpServer() {
+    stop();
+    static_cast<void>(waitUntilDrained(std::chrono::milliseconds::max()));
+}
+
 HttpServer::HttpServer(ProjectService& service,
                        Logger& logger,
                        const ApiKeyAuthenticator& authenticator,
@@ -83,6 +89,7 @@ void HttpServer::bind() {
     server_.set_payload_max_length(1024U * 1024U);
     controller_.registerRoutes(server_);
     server_.Get("/ready", [this](const httplib::Request& request, httplib::Response& response) {
+        const auto started = std::chrono::steady_clock::now();
         const std::string candidate = request.has_header("X-Request-ID")
                                           ? request.get_header_value("X-Request-ID")
                                           : std::string{};
@@ -90,11 +97,26 @@ void HttpServer::bind() {
         if (readiness_ != nullptr && readiness_->isReady()) {
             response.status = 200;
             response.set_content("{\"status\":\"ready\"}", "application/json");
-            return;
+        } else {
+            response.status = 503;
+            response.set_content(HttpError{503, "not_ready", "service is not ready"}.toJson().dump(),
+                                 "application/json");
         }
-        response.status = 503;
-        response.set_content(HttpError{503, "not_ready", "service is not ready"}.toJson().dump(),
-                             "application/json");
+        if (logger_ != nullptr) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started);
+            const std::string message = std::string(response.status >= 400 ? "HTTP error" : "HTTP request") +
+                                        " method=" + request.method +
+                                        " path=" + request.path +
+                                        " status=" + std::to_string(response.status) +
+                                        " request_id=" + response.get_header_value("X-Request-ID") +
+                                        " duration_ms=" + std::to_string(elapsed.count());
+            if (response.status >= 400) {
+                logger_->error(message);
+            } else {
+                logger_->info(message);
+            }
+        }
     });
     server_.set_pre_routing_handler(
         [this](const httplib::Request& request, httplib::Response& response) {
@@ -171,10 +193,55 @@ void HttpServer::run() {
     static_cast<void>(server_.listen_after_bind());
 }
 
+void HttpServer::runAsync() {
+    if (!bound_) {
+        throw std::logic_error("HTTP server must be bound before run");
+    }
+
+    std::lock_guard<std::mutex> lock(listenerMutex_);
+    if (listenerThread_.joinable()) {
+        throw std::logic_error("HTTP server is already running asynchronously");
+    }
+    listenerFinished_ = false;
+    listenerThread_ = std::thread([this]() {
+        static_cast<void>(server_.listen_after_bind());
+        {
+            std::lock_guard<std::mutex> lock(listenerMutex_);
+            listenerFinished_ = true;
+        }
+        listenerFinishedCondition_.notify_all();
+    });
+}
+
 void HttpServer::stop() noexcept {
     if (bound_) {
         server_.stop();
     }
+}
+
+void HttpServer::stopAccepting() noexcept {
+    stop();
+}
+
+bool HttpServer::waitUntilDrained(std::chrono::milliseconds timeout) noexcept {
+    std::thread listener;
+    {
+        std::unique_lock<std::mutex> lock(listenerMutex_);
+        if (!listenerThread_.joinable()) {
+            return true;
+        }
+        if (!listenerFinished_) {
+            if (timeout == std::chrono::milliseconds::max()) {
+                listenerFinishedCondition_.wait(lock, [this]() { return listenerFinished_; });
+            } else if (!listenerFinishedCondition_.wait_for(
+                           lock, timeout, [this]() { return listenerFinished_; })) {
+                return false;
+            }
+        }
+        listener = std::move(listenerThread_);
+    }
+    listener.join();
+    return true;
 }
 
 std::uint16_t HttpServer::boundPort() const noexcept {
