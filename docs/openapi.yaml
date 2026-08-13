@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: DevManager HTTP API
-  version: 0.7.0
+  version: 0.8.0
   description: Local project-management API exposed by DevManager.
 servers:
   - url: http://127.0.0.1:8080
@@ -395,7 +395,7 @@ components:
           example: DevManager
         version:
           type: string
-          example: 0.7.0
+          example: 0.8.0
 
     ProjectStatistics:
       type: object

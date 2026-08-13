@@ -1,4 +1,4 @@
-"""Validate the checked-in v0.7 release contract without third-party packages.
+"""Validate the checked-in v0.8 release contract without third-party packages.
 
 This is intentionally a small, deterministic guard for local release checks. The
 OpenAPI schema itself is validated separately with the pinned validator.
@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 
 def read(relative: str) -> str:
@@ -36,9 +36,15 @@ def main() -> int:
     workflow = read(".github/workflows/ci.yml")
 
     if not re.search(rf"project\(\s*DevManager\s+VERSION\s+{re.escape(VERSION)}\b", cmake):
-        raise AssertionError("CMake project version is not 0.7.0")
+        raise AssertionError("CMake project version is not 0.8.0")
     require(version_template, "@PROJECT_VERSION@", "cmake/DevManagerVersion.h.in")
     require(openapi, f"version: {VERSION}", "docs/openapi.yaml")
+    if not re.search(
+        rf"ServiceInfo:.*?version:\s*\n\s*type:\s*string\s*\n\s*example:\s*{re.escape(VERSION)}\b",
+        openapi,
+        re.DOTALL,
+    ):
+        raise AssertionError("docs/openapi.yaml ServiceInfo version example does not match the release version")
 
     for marker in (
         f"v{VERSION}",
@@ -56,8 +62,8 @@ def main() -> int:
         "/api/info",
         "/api/statistics",
         "X-Request-ID",
-        "ctest --test-dir build-v07-final -C Debug --output-on-failure",
-        ".\\build-v07-final\\devmanager_http.exe",
+        "ctest --test-dir build-v08-final -C Debug --output-on-failure",
+        ".\\build-v08-final\\devmanager_http.exe",
         "C++17",
         "DEVMANAGER_API_KEY",
         "Authorization: Bearer <API_KEY>",
@@ -70,11 +76,12 @@ def main() -> int:
         "`/ready` does not require an API key",
         "SIGINT",
         "SIGTERM",
+        "v0.8 通过真实已认证 in-flight 请求验证优雅停止期间的安全 drain",
     ):
         require(readme, marker, "README.md")
 
-    if "build-v06-final" in readme:
-        raise AssertionError("README.md still refers to the v0.6 build directory")
+    if "build-v07-final" in readme:
+        raise AssertionError("README.md still refers to the v0.7 build directory")
 
     for marker in (
         '"host": "127.0.0.1"',
