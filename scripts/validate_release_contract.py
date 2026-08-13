@@ -1,4 +1,4 @@
-"""Validate the checked-in v0.6 release contract without third-party packages.
+"""Validate the checked-in v0.7 release contract without third-party packages.
 
 This is intentionally a small, deterministic guard for local release checks. The
 OpenAPI schema itself is validated separately with the pinned validator.
@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 
 def read(relative: str) -> str:
@@ -36,7 +36,7 @@ def main() -> int:
     workflow = read(".github/workflows/ci.yml")
 
     if not re.search(rf"project\(\s*DevManager\s+VERSION\s+{re.escape(VERSION)}\b", cmake):
-        raise AssertionError("CMake project version is not 0.6.0")
+        raise AssertionError("CMake project version is not 0.7.0")
     require(version_template, "@PROJECT_VERSION@", "cmake/DevManagerVersion.h.in")
     require(openapi, f"version: {VERSION}", "docs/openapi.yaml")
 
@@ -52,10 +52,11 @@ def main() -> int:
         "page` 和 `size` 是可选的分页参数",
         "不提供 `page`/`size` 时保持 v0.4 的数组契约",
         "/health",
+        "/ready",
         "/api/info",
         "/api/statistics",
         "X-Request-ID",
-        "ctest --test-dir build-v06-final -C Debug --output-on-failure",
+        "ctest --test-dir build-v07-final -C Debug --output-on-failure",
         "C++17",
         "DEVMANAGER_API_KEY",
         "Authorization: Bearer <API_KEY>",
@@ -63,6 +64,11 @@ def main() -> int:
         "HTTP startup fails",
         "401 unauthorized",
         "v0.5 pagination and error contracts remain unchanged",
+        "1 MiB",
+        "five-second drain deadline",
+        "`/ready` does not require an API key",
+        "SIGINT",
+        "SIGTERM",
     ):
         require(readme, marker, "README.md")
 

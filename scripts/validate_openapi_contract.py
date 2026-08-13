@@ -19,6 +19,7 @@ REQUIRED_MARKERS = (
     "PUT /api/projects/{id}",
     "DELETE /api/projects/{id}",
     "GET /health",
+    "GET /ready",
     "GET /api/info",
     "GET /api/statistics",
     "techStack",
@@ -53,6 +54,10 @@ REQUIRED_MARKERS = (
     "DEVMANAGER_API_KEY",
     "WWW-Authenticate",
     "unauthorized",
+    "not_ready",
+    "payload_too_large",
+    "'413'",
+    "'503'",
 )
 
 PROTECTED_OPERATIONS = (
@@ -153,6 +158,30 @@ def main() -> int:
                 contents,
                 r"/api/projects:\s*\n\s+get:.*?responses:.*?'401':\s*\n\s+\$ref: '#/components/responses/Unauthorized'",
                 "GET /api/projects 401 unauthorized response",
+            ),
+            require_pattern(
+                contents,
+                r"/ready:\s*\n\s+get:.*?responses:\s*\n\s+'200':.*?"
+                r"X-Request-ID:.*?enum:\s*\[ready\]",
+                "GET /ready 200 ready response with request ID",
+            ),
+            require_pattern(
+                contents,
+                r"/ready:\s*\n\s+get:.*?responses:.*?'503':\s*\n\s+"
+                r"\$ref:\s*'#/components/responses/NotReady'",
+                "GET /ready 503 not ready response",
+            ),
+            require_pattern(
+                contents,
+                r"post:.*?responses:.*?'413':\s*\n\s+"
+                r"\$ref:\s*'#/components/responses/PayloadTooLarge'",
+                "POST /api/projects 413 payload too large response",
+            ),
+            require_pattern(
+                contents,
+                r"put:.*?responses:.*?'413':\s*\n\s+"
+                r"\$ref:\s*'#/components/responses/PayloadTooLarge'",
+                "PUT /api/projects/{id} 413 payload too large response",
             ),
         )
         if marker is not None

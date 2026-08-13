@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: DevManager HTTP API
-  version: 0.6.0
+  version: 0.7.0
   description: Local project-management API exposed by DevManager.
 servers:
   - url: http://127.0.0.1:8080
@@ -11,6 +11,7 @@ servers:
 # Contract: PUT /api/projects/{id}
 # Contract: DELETE /api/projects/{id}
 # Contract: GET /health
+# Contract: GET /ready
 # Contract: GET /api/info
 # Contract: GET /api/statistics
 paths:
@@ -126,6 +127,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/IdExhausted'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/PersistenceFailure'
 
@@ -161,6 +164,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/ProjectNotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '500':
           $ref: '#/components/responses/PersistenceFailure'
 
@@ -209,6 +214,34 @@ paths:
                     enum: [ok]
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /ready:
+    get:
+      operationId: readiness
+      summary: Check whether the HTTP service completed initialization
+      description: >-
+        Public readiness probe. It returns 200 only after configuration, repository,
+        migration, route, and API-key initialization complete. It does not authenticate,
+        read project data, or perform a repository health check.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Service is ready to accept requests.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+        '503':
+          $ref: '#/components/responses/NotReady'
 
   /api/info:
     get:
@@ -362,7 +395,7 @@ components:
           example: DevManager
         version:
           type: string
-          example: 0.6.0
+          example: 0.7.0
 
     ProjectStatistics:
       type: object
@@ -413,6 +446,36 @@ components:
                 error:
                   code: unauthorized
                   message: authentication required
+    NotReady:
+      description: Service is still starting or is stopping.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            notReady:
+              value:
+                error:
+                  code: not_ready
+                  message: service is not ready
+    PayloadTooLarge:
+      description: The HTTP request body exceeds the global 1 MiB limit.
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            payloadTooLarge:
+              value:
+                error:
+                  code: payload_too_large
+                  message: request payload exceeds 1 MiB
     InvalidQuery:
       description: Query parameters are unknown, repeated, empty, or mutually exclusive.
       headers:
