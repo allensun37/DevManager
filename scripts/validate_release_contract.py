@@ -107,6 +107,7 @@ def main() -> int:
         "scripts/check_http_sigterm_shutdown.py",
         "docker-compose:",
         "scripts/check_docker_compose.py",
+        "Validate v0.9 release contract",
     ):
         require(workflow, marker, ".github/workflows/ci.yml")
 
