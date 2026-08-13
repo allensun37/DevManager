@@ -54,8 +54,11 @@ public:
     void runAsync();
     void stop() noexcept;
     void stopAccepting() noexcept override;
+    [[nodiscard]] bool waitUntilListening(
+        std::chrono::milliseconds timeout) noexcept;
     [[nodiscard]] bool waitUntilDrained(
         std::chrono::milliseconds timeout) noexcept override;
+    [[nodiscard]] bool isListening() const noexcept;
     [[nodiscard]] std::uint16_t boundPort() const noexcept;
 
 private:
@@ -69,7 +72,9 @@ private:
     bool bound_ {false};
     std::mutex listenerMutex_;
     std::condition_variable listenerFinishedCondition_;
+    bool listenerStarted_ {false};
     bool listenerFinished_ {false};
+    bool listenerSucceeded_ {false};
     std::thread listenerThread_;
     RequestIdGenerator requestIdGenerator_;
     httplib::Server server_;

@@ -2,6 +2,10 @@
 #include "http/HttpError.h"
 
 #include <chrono>
+#ifndef _WIN32
+#include <csignal>
+#include <pthread.h>
+#endif
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -24,6 +28,35 @@ bool requiresAuthentication(const std::string& path) noexcept {
         std::string_view(path).substr(projectPrefix.size());
     return !projectId.empty() && projectId.find('/') == std::string_view::npos;
 }
+
+#ifndef _WIN32
+class ListenerSignalMask final {
+public:
+    ListenerSignalMask() {
+        sigset_t blockedSignals;
+        static_cast<void>(sigemptyset(&blockedSignals));
+        static_cast<void>(sigaddset(&blockedSignals, SIGINT));
+        static_cast<void>(sigaddset(&blockedSignals, SIGTERM));
+        if (pthread_sigmask(SIG_BLOCK, &blockedSignals, &previousMask_) != 0) {
+            throw std::runtime_error("failed to block stop signals in HTTP listener");
+        }
+        active_ = true;
+    }
+
+    ~ListenerSignalMask() {
+        if (active_) {
+            static_cast<void>(pthread_sigmask(SIG_SETMASK, &previousMask_, nullptr));
+        }
+    }
+
+    ListenerSignalMask(const ListenerSignalMask&) = delete;
+    ListenerSignalMask& operator=(const ListenerSignalMask&) = delete;
+
+private:
+    sigset_t previousMask_ {};
+    bool active_ {false};
+};
+#endif
 
 }  // namespace
 
@@ -87,6 +120,13 @@ void HttpServer::bind() {
     }
 
     server_.set_payload_max_length(1024U * 1024U);
+    server_.set_start_handler([this]() {
+        {
+            std::lock_guard<std::mutex> lock(listenerMutex_);
+            listenerStarted_ = true;
+        }
+        listenerFinishedCondition_.notify_all();
+    });
     controller_.registerRoutes(server_);
     server_.Get("/ready", [this](const httplib::Request& request, httplib::Response& response) {
         const auto started = std::chrono::steady_clock::now();
@@ -202,11 +242,22 @@ void HttpServer::runAsync() {
     if (listenerThread_.joinable()) {
         throw std::logic_error("HTTP server is already running asynchronously");
     }
+    listenerStarted_ = false;
     listenerFinished_ = false;
+    listenerSucceeded_ = false;
     listenerThread_ = std::thread([this]() {
-        static_cast<void>(server_.listen_after_bind());
+        bool listenerSucceeded = false;
+        try {
+#ifndef _WIN32
+            const ListenerSignalMask signalMask;
+#endif
+            listenerSucceeded = server_.listen_after_bind();
+        } catch (...) {
+            listenerSucceeded = false;
+        }
         {
             std::lock_guard<std::mutex> lock(listenerMutex_);
+            listenerSucceeded_ = listenerSucceeded;
             listenerFinished_ = true;
         }
         listenerFinishedCondition_.notify_all();
@@ -221,6 +272,21 @@ void HttpServer::stop() noexcept {
 
 void HttpServer::stopAccepting() noexcept {
     stop();
+}
+
+bool HttpServer::waitUntilListening(std::chrono::milliseconds timeout) noexcept {
+    std::unique_lock<std::mutex> lock(listenerMutex_);
+    const auto listenerStateChanged = [this]() {
+        return listenerStarted_ || listenerFinished_;
+    };
+    if (!listenerStateChanged()) {
+        if (timeout == std::chrono::milliseconds::max()) {
+            listenerFinishedCondition_.wait(lock, listenerStateChanged);
+        } else if (!listenerFinishedCondition_.wait_for(lock, timeout, listenerStateChanged)) {
+            return false;
+        }
+    }
+    return listenerStarted_ && !listenerFinished_ && server_.is_running();
 }
 
 bool HttpServer::waitUntilDrained(std::chrono::milliseconds timeout) noexcept {
@@ -242,6 +308,10 @@ bool HttpServer::waitUntilDrained(std::chrono::milliseconds timeout) noexcept {
     }
     listener.join();
     return true;
+}
+
+bool HttpServer::isListening() const noexcept {
+    return server_.is_running();
 }
 
 std::uint16_t HttpServer::boundPort() const noexcept {

@@ -30,9 +30,19 @@ int main() {
             readiness, signals, server, bootstrap.logger());
         server.bind();
         server.runAsync();
+        if (!server.waitUntilListening(std::chrono::seconds(2))) {
+            bootstrap.logger().error("HTTP listener failed before readiness");
+            static_cast<void>(lifecycle.markFailed());
+            return 1;
+        }
         lifecycle.markReady();
 
         while (!signals.stopRequested()) {
+            if (!server.isListening()) {
+                bootstrap.logger().error("HTTP listener stopped unexpectedly");
+                static_cast<void>(lifecycle.markFailed());
+                return 1;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
 

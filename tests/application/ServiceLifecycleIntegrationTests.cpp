@@ -109,4 +109,18 @@ TEST(ServiceLifecycleIntegrationTest, StopsListeningAfterARequestedGracefulShutd
     EXPECT_FALSE(client.Get("/api/projects"));
 }
 
+TEST(ServiceLifecycleIntegrationTest, DoesNotReportReadyWhenAsyncListenerStopsBeforeServing) {
+    devmanager::ProjectManager manager;
+    devmanager::ProjectService service(manager);
+    const devmanager::ApiKeyAuthenticator authenticator("test-key");
+    devmanager::HttpServer server(service, authenticator, "127.0.0.1", 0);
+
+    server.bind();
+    server.stop();
+    server.runAsync();
+
+    EXPECT_FALSE(server.waitUntilListening(std::chrono::milliseconds(500)));
+    EXPECT_TRUE(server.waitUntilDrained(std::chrono::seconds(1)));
+}
+
 }  // namespace
