@@ -16,6 +16,20 @@ def require_file(path: Path) -> str:
 
 
 def main() -> int:
+    dockerfile = require_file(ROOT / "Dockerfile")
+    for required_fragment in (
+        "debian:bookworm-slim@sha256:",
+        "AS builder",
+        "AS runtime",
+        "cmake --build build",
+        "ctest --test-dir build --output-on-failure",
+        "--uid 10001",
+        "COPY --from=builder /workspace/build/devmanager_http",
+        "ENTRYPOINT [\"/opt/devmanager/devmanager_http\"]",
+    ):
+        if required_fragment not in dockerfile:
+            raise AssertionError(f"Dockerfile must contain {required_fragment!r}")
+
     environment_example = require_file(ROOT / "deploy" / "docker" / ".env.example")
     if "DEVMANAGER_API_KEY=" not in environment_example:
         raise AssertionError(".env.example must document DEVMANAGER_API_KEY")
@@ -32,6 +46,28 @@ def main() -> int:
         "logging": {"level": "info", "path": "/var/log/devmanager/devmanager.log"},
     }:
         raise AssertionError("container config must use the approved server, SQLite, and log paths")
+
+    compose = require_file(ROOT / "deploy" / "docker" / "compose.yaml")
+    for required_fragment in (
+        "devmanager:",
+        "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080",
+        "DEVMANAGER_API_KEY: ${DEVMANAGER_API_KEY:?Set DEVMANAGER_API_KEY in deploy/docker/.env}",
+        "restart: unless-stopped",
+        "init: true",
+        "stop_grace_period: 10s",
+        "read_only: true",
+        "cap_drop: [ALL]",
+        "no-new-privileges:true",
+        "devmanager-data:/var/lib/devmanager",
+        "devmanager-logs:/var/log/devmanager",
+        "http://127.0.0.1:8080/ready",
+    ):
+        if required_fragment not in compose:
+            raise AssertionError(f"compose.yaml must contain {required_fragment!r}")
+
+    gitignore = require_file(ROOT / ".gitignore")
+    if "/deploy/docker/.env" not in gitignore:
+        raise AssertionError(".gitignore must exclude deploy/docker/.env")
 
     print("Docker deployment contract passed")
     return 0

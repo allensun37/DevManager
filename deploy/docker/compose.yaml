@@ -1,0 +1,33 @@
+services:
+  devmanager:
+    image: devmanager:0.9.0
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      DEVMANAGER_API_KEY: ${DEVMANAGER_API_KEY:?Set DEVMANAGER_API_KEY in deploy/docker/.env}
+    ports:
+      - "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080"
+    volumes:
+      - devmanager-data:/var/lib/devmanager
+      - devmanager-logs:/var/log/devmanager
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  devmanager-data:
+  devmanager-logs:
