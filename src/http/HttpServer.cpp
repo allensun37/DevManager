@@ -64,10 +64,12 @@ HttpServer::HttpServer(ProjectService& service,
                        const ApiKeyAuthenticator& authenticator,
                        std::string host,
                        std::uint16_t port,
-                       RequestIdGenerator requestIdGenerator)
+                       RequestIdGenerator requestIdGenerator,
+                       std::shared_ptr<HttpServerTestHook> testHook)
     : service_(service),
       logger_(nullptr),
       authenticator_(authenticator),
+      testHook_(std::move(testHook)),
       host_(std::move(host)),
       requestedPort_(port),
       requestIdGenerator_(std::move(requestIdGenerator)),
@@ -78,8 +80,10 @@ HttpServer::HttpServer(ProjectService& service,
                        ReadinessState& readiness,
                        std::string host,
                        std::uint16_t port,
-                       RequestIdGenerator requestIdGenerator)
-    : HttpServer(service, authenticator, std::move(host), port, std::move(requestIdGenerator)) {
+                       RequestIdGenerator requestIdGenerator,
+                       std::shared_ptr<HttpServerTestHook> testHook)
+    : HttpServer(service, authenticator, std::move(host), port, std::move(requestIdGenerator),
+                 std::move(testHook)) {
     readiness_ = &readiness;
 }
 
@@ -93,10 +97,12 @@ HttpServer::HttpServer(ProjectService& service,
                        const ApiKeyAuthenticator& authenticator,
                        std::string host,
                        std::uint16_t port,
-                       RequestIdGenerator requestIdGenerator)
+                       RequestIdGenerator requestIdGenerator,
+                       std::shared_ptr<HttpServerTestHook> testHook)
     : service_(service),
       logger_(&logger),
       authenticator_(authenticator),
+      testHook_(std::move(testHook)),
       host_(std::move(host)),
       requestedPort_(port),
       requestIdGenerator_(std::move(requestIdGenerator)),
@@ -108,9 +114,10 @@ HttpServer::HttpServer(ProjectService& service,
                        ReadinessState& readiness,
                        std::string host,
                        std::uint16_t port,
-                       RequestIdGenerator requestIdGenerator)
+                       RequestIdGenerator requestIdGenerator,
+                       std::shared_ptr<HttpServerTestHook> testHook)
     : HttpServer(service, logger, authenticator, std::move(host), port,
-                 std::move(requestIdGenerator)) {
+                 std::move(requestIdGenerator), std::move(testHook)) {
     readiness_ = &readiness;
 }
 
@@ -160,11 +167,17 @@ void HttpServer::bind() {
     });
     server_.set_pre_routing_handler(
         [this](const httplib::Request& request, httplib::Response& response) {
-            if (!requiresAuthentication(request.path) ||
-                authenticator_.authenticate(
+            if (!requiresAuthentication(request.path)) {
+                return httplib::Server::HandlerResponse::Unhandled;
+            }
+
+            if (authenticator_.authenticate(
                     request.has_header("Authorization")
                         ? request.get_header_value("Authorization")
                         : std::string_view{})) {
+                if (testHook_ != nullptr) {
+                    testHook_->onAuthenticatedRequest();
+                }
                 return httplib::Server::HandlerResponse::Unhandled;
             }
 
@@ -244,6 +257,7 @@ void HttpServer::runAsync() {
     }
     listenerStarted_ = false;
     listenerFinished_ = false;
+    acceptingStopped_ = false;
 #ifndef _WIN32
     const ListenerSignalMask listenerSignalMask;
 #endif
@@ -263,6 +277,11 @@ void HttpServer::runAsync() {
 void HttpServer::stop() noexcept {
     if (bound_) {
         server_.stop();
+        {
+            std::lock_guard<std::mutex> lock(listenerMutex_);
+            acceptingStopped_ = true;
+        }
+        acceptingStoppedCondition_.notify_all();
     }
 }
 
@@ -283,6 +302,16 @@ bool HttpServer::waitUntilListening(std::chrono::milliseconds timeout) noexcept 
         }
     }
     return listenerStarted_ && !listenerFinished_ && server_.is_running();
+}
+
+bool HttpServer::waitUntilAcceptingStopped(std::chrono::milliseconds timeout) noexcept {
+    std::unique_lock<std::mutex> lock(listenerMutex_);
+    const auto acceptingStopped = [this]() { return acceptingStopped_; };
+    if (timeout == std::chrono::milliseconds::max()) {
+        acceptingStoppedCondition_.wait(lock, acceptingStopped);
+        return true;
+    }
+    return acceptingStoppedCondition_.wait_for(lock, timeout, acceptingStopped);
 }
 
 bool HttpServer::waitUntilDrained(std::chrono::milliseconds timeout) noexcept {

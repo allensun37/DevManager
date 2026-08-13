@@ -1,5 +1,6 @@
 #pragma once
 
+#include "http/HttpServerTestHook.h"
 #include "http/ProjectHttpController.h"
 #include "http/RequestId.h"
 #include "application/ReadinessState.h"
@@ -12,6 +13,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -24,26 +26,30 @@ public:
                const ApiKeyAuthenticator& authenticator,
                std::string host,
                std::uint16_t port,
-               RequestIdGenerator requestIdGenerator = {});
+               RequestIdGenerator requestIdGenerator = {},
+               std::shared_ptr<HttpServerTestHook> testHook = nullptr);
     HttpServer(ProjectService& service,
                const ApiKeyAuthenticator& authenticator,
                ReadinessState& readiness,
                std::string host,
                std::uint16_t port,
-               RequestIdGenerator requestIdGenerator = {});
+               RequestIdGenerator requestIdGenerator = {},
+               std::shared_ptr<HttpServerTestHook> testHook = nullptr);
     HttpServer(ProjectService& service,
                Logger& logger,
                const ApiKeyAuthenticator& authenticator,
                std::string host,
                std::uint16_t port,
-               RequestIdGenerator requestIdGenerator = {});
+               RequestIdGenerator requestIdGenerator = {},
+               std::shared_ptr<HttpServerTestHook> testHook = nullptr);
     HttpServer(ProjectService& service,
                Logger& logger,
                const ApiKeyAuthenticator& authenticator,
                ReadinessState& readiness,
                std::string host,
                std::uint16_t port,
-               RequestIdGenerator requestIdGenerator = {});
+               RequestIdGenerator requestIdGenerator = {},
+               std::shared_ptr<HttpServerTestHook> testHook = nullptr);
     ~HttpServer() override;
 
     HttpServer(const HttpServer&) = delete;
@@ -56,6 +62,8 @@ public:
     void stopAccepting() noexcept override;
     [[nodiscard]] bool waitUntilListening(
         std::chrono::milliseconds timeout) noexcept;
+    [[nodiscard]] bool waitUntilAcceptingStopped(
+        std::chrono::milliseconds timeout) noexcept;
     [[nodiscard]] bool waitUntilDrained(
         std::chrono::milliseconds timeout) noexcept override;
     [[nodiscard]] bool isListening() const noexcept;
@@ -65,6 +73,7 @@ private:
     ProjectService& service_;
     Logger* logger_;
     const ApiKeyAuthenticator& authenticator_;
+    std::shared_ptr<HttpServerTestHook> testHook_;
     ReadinessState* readiness_ {nullptr};
     std::string host_;
     std::uint16_t requestedPort_;
@@ -72,8 +81,10 @@ private:
     bool bound_ {false};
     std::mutex listenerMutex_;
     std::condition_variable listenerFinishedCondition_;
+    std::condition_variable acceptingStoppedCondition_;
     bool listenerStarted_ {false};
     bool listenerFinished_ {false};
+    bool acceptingStopped_ {false};
     std::thread listenerThread_;
     RequestIdGenerator requestIdGenerator_;
     httplib::Server server_;
