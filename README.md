@@ -1,16 +1,17 @@
 # DevManager
 
-DevManager 是一个使用 C++17 和 CMake 构建的本地项目管理工具，提供 CLI 和 HTTP/JSON API。当前发布版本为 **v0.8.0**。
+DevManager 是一个使用 C++17 和 CMake 构建的本地项目管理工具，提供 CLI 和 HTTP/JSON API。当前发布版本为 **v0.9.0**。
 
-## v0.8.0 能力
+## v0.9.0 能力
 
 - CLI：列出、新增、编辑、删除、名称/技术栈搜索、状态筛选和按 ID/名称/状态升序排序。
 - HTTP：项目 CRUD、查询/筛选/排序，以及公开的 `/health`、`/ready`、`/api/info` 和 `/api/statistics`。
 - 存储：JSON 和 SQLite 是互斥、独立的后端；二者都提供相同的查询、排序和分页语义。
 - 配置：缺失 `config/devmanager.json` 时仍使用 JSON 后端默认值；示例配置见 [`config/devmanager.example.json`](config/devmanager.example.json)。
 - 请求追踪：HTTP 响应带有 `X-Request-ID`；请求体全局上限为 1 MiB，超出时返回 `413 payload_too_large`；详细契约以 [`docs/openapi.yaml`](docs/openapi.yaml) 为准。
+- 部署：提供本机 Docker Compose 单容器部署、loopback-only 端口映射和 SQLite/log named volumes。
 
-版本只有一个来源：CMake 的 `project(DevManager VERSION 0.8.0 LANGUAGES C CXX)`。构建时由 CMake 生成 `DevManagerVersion.h`；运行时 `/api/info` 和测试读取生成值，代码中不手写版本号。
+版本只有一个来源：CMake 的 `project(DevManager VERSION 0.9.0 LANGUAGES C CXX)`。构建时由 CMake 生成 `DevManagerVersion.h`；运行时 `/api/info` 和测试读取生成值，代码中不手写版本号。
 
 ## HTTP API Key 认证（v0.6）
 
@@ -22,7 +23,7 @@ PowerShell 示例：
 
 ```powershell
 $env:DEVMANAGER_API_KEY = "local-dev-key"
-.\build-v08-final\devmanager_http.exe
+.\build-v09-final\devmanager_http.exe
 ```
 
 请求示例：
@@ -63,12 +64,12 @@ JSON 与 SQLite 后端互斥且彼此独立：一次运行只选择 `storage.typ
 在项目根目录执行：
 
 ```powershell
-cmake -S . -B build-v08-final -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-v08-final --config Debug
-ctest --test-dir build-v08-final -C Debug --output-on-failure
+cmake -S . -B build-v09-final -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-v09-final --config Debug
+ctest --test-dir build-v09-final -C Debug --output-on-failure
 ```
 
-完整 CTest 可使用 `ctest --test-dir build-v08-final -C Debug --output-on-failure --timeout 60`。Visual Studio 或其他 CMake 生成器可省略 `-G`。依赖通过带固定 hash/提交的 CMake FetchContent 获取；网络不可用时只能复用已缓存依赖，不能关闭 TLS 或移除 hash 校验。
+完整 CTest 可使用 `ctest --test-dir build-v09-final -C Debug --output-on-failure --timeout 60`。Visual Studio 或其他 CMake 生成器可省略 `-G`。依赖通过带固定 hash/提交的 CMake FetchContent 获取；网络不可用时只能复用已缓存依赖，不能关闭 TLS 或移除 hash 校验。
 
 OpenAPI 检查：
 
@@ -81,13 +82,37 @@ py -3 scripts/validate_release_contract.py
 ## 运行 CLI 和 HTTP 服务
 
 ```powershell
-.\build-v08-final\DevManager.exe
-.\build-v08-final\devmanager_http.exe
+.\build-v09-final\DevManager.exe
+.\build-v09-final\devmanager_http.exe
 ```
 
 HTTP 服务默认监听 `127.0.0.1:8080`，也可通过 `config/devmanager.json` 修改。CLI 和 HTTP 服务不要同时写入同一个 JSON 文件。
 
 接口包括：`GET/POST /api/projects`、`PUT/DELETE /api/projects/{id}`、公开的 `GET /health`、`GET /ready`、`GET /api/info` 和 `GET /api/statistics`。
+
+## Docker Compose 部署（v0.9）
+
+需要已运行的 Docker Engine 和 Docker Compose。复制示例环境文件后，在 `deploy/docker/.env` 中填写仅供本机使用的 API Key；不要提交真实 `.env`，也不要把 Key 写进镜像、配置或日志。
+
+```powershell
+Copy-Item deploy/docker/.env.example deploy/docker/.env
+# 编辑 deploy/docker/.env，设置一个本机 API Key。
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml up -d --build
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml ps
+curl.exe http://127.0.0.1:8080/health
+curl.exe -H "Authorization: Bearer <API_KEY>" http://127.0.0.1:8080/api/projects
+```
+
+Compose 在容器内监听 `0.0.0.0:8080`，但 host 映射固定为 `127.0.0.1:${DEVMANAGER_PORT:-8080}:8080`，不会默认暴露给局域网或公网。`/ready` 是容器 healthcheck，只有配置、SQLite migration、路由和认证初始化完成后才为 healthy。
+
+SQLite 数据和文件日志分别保存在 `devmanager-data` 与 `devmanager-logs` named volumes 中，因此 `docker compose restart` 和不带 `-v` 的 `docker compose down` 都会保留数据。停止服务：
+
+```powershell
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml stop
+docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml down
+```
+
+`docker compose down -v` 会删除 `devmanager-data`、`devmanager-logs` 及其中的 SQLite 数据和日志；仅在确定要清空本地部署数据时使用。
 
 ## JSON 后端
 
@@ -121,4 +146,4 @@ HTTP 服务默认监听 `127.0.0.1:8080`，也可通过 `config/devmanager.json`
 
 - CMake 3.20 或更高版本，以及支持 C++17 的编译器（GCC/MinGW 或 MSVC）。
 - 固定版本的 nlohmann/json、GoogleTest、spdlog、cpp-httplib 和 SQLite amalgamation。
-- 本版本不包含 MySQL、Redis、Docker、前端、用户系统或认证功能。
+- 本版本不包含 MySQL、Redis、前端、用户系统、Docker Swarm、Kubernetes 或公网部署功能。

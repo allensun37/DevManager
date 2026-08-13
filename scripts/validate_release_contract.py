@@ -1,4 +1,4 @@
-"""Validate the checked-in v0.8 release contract without third-party packages.
+"""Validate the checked-in v0.9 release contract without third-party packages.
 
 This is intentionally a small, deterministic guard for local release checks. The
 OpenAPI schema itself is validated separately with the pinned validator.
@@ -12,7 +12,7 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 
 
 def read(relative: str) -> str:
@@ -36,7 +36,7 @@ def main() -> int:
     workflow = read(".github/workflows/ci.yml")
 
     if not re.search(rf"project\(\s*DevManager\s+VERSION\s+{re.escape(VERSION)}\b", cmake):
-        raise AssertionError("CMake project version is not 0.8.0")
+        raise AssertionError("CMake project version is not 0.9.0")
     require(version_template, "@PROJECT_VERSION@", "cmake/DevManagerVersion.h.in")
     require(openapi, f"version: {VERSION}", "docs/openapi.yaml")
     if not re.search(
@@ -62,8 +62,8 @@ def main() -> int:
         "/api/info",
         "/api/statistics",
         "X-Request-ID",
-        "ctest --test-dir build-v08-final -C Debug --output-on-failure",
-        ".\\build-v08-final\\devmanager_http.exe",
+        "ctest --test-dir build-v09-final -C Debug --output-on-failure",
+        ".\\build-v09-final\\devmanager_http.exe",
         "C++17",
         "DEVMANAGER_API_KEY",
         "Authorization: Bearer <API_KEY>",
@@ -77,11 +77,16 @@ def main() -> int:
         "SIGINT",
         "SIGTERM",
         "v0.8 通过真实已认证 in-flight 请求验证优雅停止期间的安全 drain",
+        "Docker Compose 部署（v0.9）",
+        "docker compose --env-file deploy/docker/.env -f deploy/docker/compose.yaml up -d --build",
+        "127.0.0.1:${DEVMANAGER_PORT:-8080}:8080",
+        "devmanager-data",
+        "docker compose down -v",
     ):
         require(readme, marker, "README.md")
 
-    if "build-v07-final" in readme:
-        raise AssertionError("README.md still refers to the v0.7 build directory")
+    if "build-v07-final" in readme or "build-v08-final" in readme:
+        raise AssertionError("README.md still refers to an older build directory")
 
     for marker in (
         '"host": "127.0.0.1"',
@@ -100,8 +105,13 @@ def main() -> int:
         "python -m openapi_spec_validator docs/openapi.yaml",
         "ctest --test-dir build -C Debug --output-on-failure",
         "scripts/check_http_sigterm_shutdown.py",
+        "docker-compose:",
+        "scripts/check_docker_compose.py",
     ):
         require(workflow, marker, ".github/workflows/ci.yml")
+
+    require(read("Dockerfile"), "debian:bookworm-slim@sha256:", "Dockerfile")
+    require(read("deploy/docker/compose.yaml"), "devmanager-data:/var/lib/devmanager", "deploy/docker/compose.yaml")
 
     print(f"v{VERSION} release contract verified")
     return 0
