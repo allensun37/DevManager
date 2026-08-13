@@ -1,0 +1,13 @@
+.git/
+.worktrees/
+build*/
+logs/
+data/
+.env
+**/.env
+__pycache__/
+*.pyc
+Testing/
+*.db
+*.db-shm
+*.db-wal
