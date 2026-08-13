@@ -244,20 +244,16 @@ void HttpServer::runAsync() {
     }
     listenerStarted_ = false;
     listenerFinished_ = false;
-    listenerSucceeded_ = false;
-    listenerThread_ = std::thread([this]() {
-        bool listenerSucceeded = false;
-        try {
 #ifndef _WIN32
-            const ListenerSignalMask signalMask;
+    const ListenerSignalMask listenerSignalMask;
 #endif
-            listenerSucceeded = server_.listen_after_bind();
+    listenerThread_ = std::thread([this]() {
+        try {
+            static_cast<void>(server_.listen_after_bind());
         } catch (...) {
-            listenerSucceeded = false;
         }
         {
             std::lock_guard<std::mutex> lock(listenerMutex_);
-            listenerSucceeded_ = listenerSucceeded;
             listenerFinished_ = true;
         }
         listenerFinishedCondition_.notify_all();

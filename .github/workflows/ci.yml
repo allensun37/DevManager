@@ -49,5 +49,9 @@ jobs:
       - name: Verify HTTP startup rejects missing API key
         run: python scripts/check_http_auth_startup.py
 
+      - name: Verify Linux SIGTERM graceful shutdown
+        if: runner.os == 'Linux'
+        run: python scripts/check_http_sigterm_shutdown.py
+
       - name: Test
         run: ctest --test-dir build -C Debug --output-on-failure

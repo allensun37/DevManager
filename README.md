@@ -22,7 +22,7 @@ PowerShell 示例：
 
 ```powershell
 $env:DEVMANAGER_API_KEY = "local-dev-key"
-.\build-v06-final\devmanager_http.exe
+.\build-v07-final\devmanager_http.exe
 ```
 
 请求示例：

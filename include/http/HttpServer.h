@@ -74,7 +74,6 @@ private:
     std::condition_variable listenerFinishedCondition_;
     bool listenerStarted_ {false};
     bool listenerFinished_ {false};
-    bool listenerSucceeded_ {false};
     std::thread listenerThread_;
     RequestIdGenerator requestIdGenerator_;
     httplib::Server server_;

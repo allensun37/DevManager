@@ -57,6 +57,7 @@ def main() -> int:
         "/api/statistics",
         "X-Request-ID",
         "ctest --test-dir build-v07-final -C Debug --output-on-failure",
+        ".\\build-v07-final\\devmanager_http.exe",
         "C++17",
         "DEVMANAGER_API_KEY",
         "Authorization: Bearer <API_KEY>",
@@ -71,6 +72,9 @@ def main() -> int:
         "SIGTERM",
     ):
         require(readme, marker, "README.md")
+
+    if "build-v06-final" in readme:
+        raise AssertionError("README.md still refers to the v0.6 build directory")
 
     for marker in (
         '"host": "127.0.0.1"',
@@ -88,6 +92,7 @@ def main() -> int:
         "python-version: '3.12.4'",
         "python -m openapi_spec_validator docs/openapi.yaml",
         "ctest --test-dir build -C Debug --output-on-failure",
+        "scripts/check_http_sigterm_shutdown.py",
     ):
         require(workflow, marker, ".github/workflows/ci.yml")
 
