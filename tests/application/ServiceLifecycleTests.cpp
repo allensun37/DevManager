@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace {
 
@@ -41,6 +42,7 @@ public:
     [[nodiscard]] bool waitUntilDrained(std::chrono::milliseconds timeout) noexcept override {
         ++waitCalls;
         observedTimeout = timeout;
+        observedTimeouts.push_back(timeout);
         if (onWait) {
             onWait();
         }
@@ -51,6 +53,7 @@ public:
     unsigned int waitCalls {0U};
     bool drained {true};
     std::chrono::milliseconds observedTimeout {0};
+    std::vector<std::chrono::milliseconds> observedTimeouts;
     std::function<void()> onWait;
 };
 
@@ -143,6 +146,51 @@ TEST_F(ServiceLifecycleTest, ReportsShutdownTimeoutWithoutSensitiveLogContent) {
     EXPECT_NE(contents.find("shutdown_timeout"), std::string::npos);
     EXPECT_EQ(contents.find("Authorization"), std::string::npos);
     EXPECT_EQ(contents.find("test-api-key"), std::string::npos);
+}
+
+TEST_F(ServiceLifecycleTest, TimeoutLeavesReadinessStoppingUntilDrainFinishes) {
+    devmanager::ReadinessState readiness;
+    FakeStopSource stopSource;
+    FakeRuntime runtime;
+    stopSource.stop = true;
+    runtime.drained = false;
+    devmanager::ServiceLifecycle lifecycle(readiness, stopSource, runtime, *logger);
+
+    EXPECT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::ShutdownTimeout);
+    EXPECT_EQ(readiness.state(), devmanager::ServiceState::Stopping);
+    EXPECT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::ShutdownTimeout);
+    EXPECT_EQ(runtime.stopCalls, 1U);
+    EXPECT_EQ(runtime.waitCalls, 1U);
+}
+
+TEST_F(ServiceLifecycleTest, FinishingAfterTimeoutMarksStoppedButRetainsTimeoutResult) {
+    devmanager::ReadinessState readiness;
+    FakeStopSource stopSource;
+    FakeRuntime runtime;
+    stopSource.stop = true;
+    runtime.drained = false;
+    devmanager::ServiceLifecycle lifecycle(readiness, stopSource, runtime, *logger);
+
+    ASSERT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::ShutdownTimeout);
+    runtime.drained = true;
+
+    EXPECT_EQ(lifecycle.finishAfterDrain(), devmanager::ServiceExit::ShutdownTimeout);
+    EXPECT_EQ(readiness.state(), devmanager::ServiceState::Stopped);
+    ASSERT_EQ(runtime.observedTimeouts.size(), 2U);
+    EXPECT_EQ(runtime.observedTimeouts.at(0), std::chrono::seconds(5));
+    EXPECT_EQ(runtime.observedTimeouts.at(1), std::chrono::milliseconds::max());
+}
+
+TEST_F(ServiceLifecycleTest, FinishingAfterNormalShutdownDoesNotDrainAgain) {
+    devmanager::ReadinessState readiness;
+    FakeStopSource stopSource;
+    FakeRuntime runtime;
+    stopSource.stop = true;
+    devmanager::ServiceLifecycle lifecycle(readiness, stopSource, runtime, *logger);
+
+    ASSERT_EQ(lifecycle.stopWhenRequested(), devmanager::ServiceExit::Stopped);
+    EXPECT_EQ(lifecycle.finishAfterDrain(), devmanager::ServiceExit::Stopped);
+    EXPECT_EQ(runtime.waitCalls, 1U);
 }
 
 TEST_F(ServiceLifecycleTest, ForceStopSkipsDrainAfterStoppingListener) {

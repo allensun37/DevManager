@@ -28,6 +28,7 @@ public:
 
     void markReady() noexcept;
     [[nodiscard]] ServiceExit stopWhenRequested();
+    [[nodiscard]] ServiceExit finishAfterDrain();
     [[nodiscard]] ServiceExit markFailed() noexcept;
 
 private:

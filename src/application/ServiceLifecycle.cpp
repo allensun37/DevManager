@@ -52,7 +52,6 @@ ServiceExit ServiceLifecycle::stopWhenRequested() {
 
     if (!drained) {
         logger_.warn("shutdown_timeout");
-        readiness_.markStopped();
         stoppingResult_ = ServiceExit::ShutdownTimeout;
         return stoppingResult_;
     }
@@ -60,6 +59,20 @@ ServiceExit ServiceLifecycle::stopWhenRequested() {
     readiness_.markStopped();
     stoppingResult_ = ServiceExit::Stopped;
     return stoppingResult_;
+}
+
+ServiceExit ServiceLifecycle::finishAfterDrain() {
+    if (readiness_.state() == ServiceState::Failed) {
+        return ServiceExit::Failed;
+    }
+    if (stoppingResult_ != ServiceExit::ShutdownTimeout) {
+        return stoppingResult_;
+    }
+
+    if (runtime_.waitUntilDrained(std::chrono::milliseconds::max())) {
+        readiness_.markStopped();
+    }
+    return ServiceExit::ShutdownTimeout;
 }
 
 ServiceExit ServiceLifecycle::markFailed() noexcept {
