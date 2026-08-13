@@ -55,3 +55,19 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Debug --output-on-failure
+
+  docker-compose:
+    name: Docker Compose deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        env:
+          DEVMANAGER_API_KEY: ci-v09-compose-validation-key
+        run: docker compose -f deploy/docker/compose.yaml config
+
+      - name: Build and verify Docker Compose deployment
+        run: python scripts/check_docker_compose.py

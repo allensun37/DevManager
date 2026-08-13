@@ -69,6 +69,34 @@ def main() -> int:
     if "/deploy/docker/.env" not in gitignore:
         raise AssertionError(".gitignore must exclude deploy/docker/.env")
 
+    smoke = require_file(ROOT / "scripts" / "check_docker_compose.py")
+    for required_fragment in (
+        "--project-name",
+        "--env-file",
+        "up",
+        "restart",
+        "down",
+        "--remove-orphans",
+        "DEVMANAGER_API_KEY",
+        "/health",
+        "/ready",
+        "/api/projects",
+    ):
+        if required_fragment not in smoke:
+            raise AssertionError(f"Docker Compose smoke script must contain {required_fragment!r}")
+
+    workflow = require_file(ROOT / ".github" / "workflows" / "ci.yml")
+    for required_fragment in (
+        "docker-compose:",
+        "runs-on: ubuntu-latest",
+        "docker compose -f deploy/docker/compose.yaml config",
+        "python scripts/check_docker_compose.py",
+        "os: [ubuntu-latest, windows-latest]",
+        "ctest --test-dir build -C Debug --output-on-failure",
+    ):
+        if required_fragment not in workflow:
+            raise AssertionError(f"CI workflow must contain {required_fragment!r}")
+
     print("Docker deployment contract passed")
     return 0
 
